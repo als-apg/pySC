@@ -110,6 +110,24 @@ def configure_magnets(SC: SimulatedCommissioning):
         SC.magnet_arrays[magnet_category_name] = magnet_list
         SC.control_arrays[magnet_category_name] = control_list
 
+        wrong_polarity_conf = magnet_category_conf.get('wrong_polarity', {})
+        if wrong_polarity_conf:
+            declared = {comp for d in magnet_category_conf.get('components', []) for comp in d}
+            for comp in wrong_polarity_conf:
+                assert comp in declared, f"wrong_polarity references undeclared component '{comp}' in {magnet_category_name}"
+            for component_name, fraction in wrong_polarity_conf.items():
+                if fraction <= 0:
+                    continue
+                component_controls = [c for c in control_list if c.endswith(f'/{component_name}')]
+                if not component_controls:
+                    continue
+                n_flip = max(1, round(len(component_controls) * fraction))
+                flip_indices = SC.rng.choice(len(component_controls), size=n_flip, replace=False)
+                for i in flip_indices:
+                    control_name = component_controls[i]
+                    link_name = f'{control_name}->{control_name}'
+                    SC.magnet_settings.links[link_name].error.factor *= -1
+
     SC.magnet_settings.connect_links()
     SC.magnet_settings.sendall()
     SC.design_magnet_settings.connect_links()

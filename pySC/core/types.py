@@ -4,8 +4,8 @@ import numpy as np
 from pathlib import Path
 
 NPARRAY = Annotated[np.ndarray,
-                    BeforeValidator(lambda x: np.array(x)),
-                    PlainSerializer(lambda x: x.tolist(), return_type=list)
+                    BeforeValidator(lambda x: np.array(x) if x is not None else None),
+                    PlainSerializer(lambda x: x.tolist() if x is not None else None, return_type=list)
                    ]
 
 class BaseModelWithSave(BaseModel, extra="forbid"):
