@@ -12,6 +12,7 @@ from .supports_conf import configure_supports
 from .tuning_conf import configure_tuning
 from .injection_conf import configure_injection
 from .general import scale_error_table
+from ..utils.sc_tools import scale_circumference
 
 logger = logging.getLogger(__name__)
 
@@ -86,4 +87,13 @@ def generate_SC(yaml_filepath: str, seed: int = 1, scale_errors: Optional[int] =
 
     logger.info('Configuring injection...')
     configure_injection(SC)
+
+    # Apply circumference error (working ring only, matching MATLAB SCapplyErrors)
+    error_table = config_dict.get('error_table', {})
+    circ_sigma = float(error_table.get('circumference_error', 0))
+    if circ_sigma and isinstance(SC.lattice, ATLattice):
+        circ_scaling = 1 + circ_sigma * SC.rng.normal_trunc(loc=0, scale=1)
+        scale_circumference(SC.lattice.ring, circ_scaling, mode='rel')
+        logger.info(f'Circumference error applied: scaling = {circ_scaling:.10f}')
+
     return SC

@@ -112,3 +112,38 @@ def test_generate_sc_sigma_truncate(tmp_path):
     SC = generate_SC(filepath, seed=42, sigma_truncate=3)
 
     assert SC.rng.default_truncation == 3
+
+
+@pytest.mark.slow
+def test_generate_sc_circumference_error(tmp_path):
+    """circumference_error in error_table scales the working ring but not the design ring."""
+    error_table = {
+        "quad_cal": "0.01",
+        "bpm_cal": "0.01",
+        "orbit_noise": "1e-4",
+        "tbt_noise": "1e-3",
+        "circumference_error": "1e-4",  # large sigma for easy detection
+    }
+    filepath = _write_minimal_config(tmp_path, error_table=error_table)
+    SC = generate_SC(filepath, seed=42)
+
+    design_C = sum(elem.Length for elem in SC.lattice.design)
+    working_C = sum(elem.Length for elem in SC.lattice.ring)
+
+    # Design ring should be untouched
+    assert design_C == pytest.approx(sum(elem.Length for elem in SC.lattice.design))
+    # Working ring circumference should differ from design
+    assert working_C != pytest.approx(design_C, abs=1e-12)
+
+
+@pytest.mark.slow
+def test_generate_sc_no_circumference_error(tmp_path):
+    """Without circumference_error, working and design rings have the same circumference."""
+    filepath = _write_minimal_config(tmp_path)
+    SC = generate_SC(filepath, seed=42)
+
+    design_C = sum(elem.Length for elem in SC.lattice.design)
+    working_C = sum(elem.Length for elem in SC.lattice.ring)
+
+    # Other errors (magnet cal, support misalignment) don't change element lengths
+    assert working_C == pytest.approx(design_C)
