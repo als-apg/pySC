@@ -42,6 +42,13 @@ def configure_supports(SC: SimulatedCommissioning):
         if alignment not in ['absolute', 'relative']:
             raise Exception('Unknown alignment mode: {alignment}. Only "absolute" and "relative" are supported.')
 
+        # Paraxial mode: both endpoints get the same offset (translation only, no tilting).
+        # Tilting mode (default): each endpoint gets an independent random offset.
+        # This matches MATLAB SCregisterSupport behavior:
+        #   1-row Offset → paraxial (same offset both endpoints)
+        #   2-row Offset → tilting (independent endpoint offsets)
+        paraxial = dict.get(level_conf, 'paraxial', False)
+
         zero_length_supports = []
         for index_start, index_end in zip(indices_start, indices_end):
             # If in the future I want to give names to supports (e.g. girders),
@@ -60,7 +67,7 @@ def configure_supports(SC: SimulatedCommissioning):
                 if alignment == 'relative':
                     sigma = sigma / SQRT2
                 this_support.start.dx = SC.rng.normal_trunc(0, sigma)
-                if support_has_zero_length:
+                if paraxial or support_has_zero_length:
                     this_support.end.dx = this_support.start.dx
                 else:
                     this_support.end.dx = SC.rng.normal_trunc(0, sigma)
@@ -70,7 +77,7 @@ def configure_supports(SC: SimulatedCommissioning):
                 if alignment == 'relative':
                     sigma = sigma / SQRT2
                 this_support.start.dy = SC.rng.normal_trunc(0, sigma)
-                if support_has_zero_length:
+                if paraxial or support_has_zero_length:
                     this_support.end.dy = this_support.start.dy
                 else:
                     this_support.end.dy = SC.rng.normal_trunc(0, sigma)
