@@ -86,7 +86,12 @@ def test_magnet_update_resets_to_offsets():
 
 
 def test_magnet_update_integrated_strength():
-    """Link with is_integrated=True divides link value by magnet length."""
+    """Link with is_integrated=True divides link value by magnet length.
+
+    For B-component integrated links, the AT sign convention applies:
+    Δx' = -PolynomB[0]*L, so positive setpoint → negative PolynomB
+    (positive physical kick).  The B value is negated after division.
+    """
     m, parent = _make_magnet_with_parent(max_order=1, length=2.0)
 
     ctrl = Control(name="c1", setpoint=6.0)
@@ -98,8 +103,8 @@ def test_magnet_update_integrated_strength():
     m._links = [link]
 
     m.update()
-    # 6.0 / 2.0 = 3.0
-    assert m.B[0] == pytest.approx(3.0)
+    # 6.0 / 2.0 = 3.0, negated for B-component: -3.0
+    assert m.B[0] == pytest.approx(-3.0)
 
 
 def test_magnet_update_no_length_raises():

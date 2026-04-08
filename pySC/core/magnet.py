@@ -102,7 +102,13 @@ class Magnet(BaseModel, extra="forbid"):
             if link.is_integrated:
                 assert self.length is not None, f'ERROR: magnet length not specified for integrated strength link: {repr(link)}'
                 value = value / self.length
-                # if it is equal to zero then assume A and B are already integrated strengths :(
+                # AT sign convention: Δx' = -PolynomB[0]*L, so a positive
+                # horizontal kick requires negative PolynomB.  Negate the
+                # B-component so that a positive setpoint produces a positive
+                # physical kick, matching MATLAB's SCsetCMs2SetPoints
+                # (normBy = [-1, 1] * Length).
+                if link.component == "B":
+                    value = -value
             if link.component == "A":
                 self.A[link.order - 1] += value
             elif link.component == "B":
