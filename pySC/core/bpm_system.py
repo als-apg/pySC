@@ -111,8 +111,13 @@ class BPMSystem(BaseModel, extra='forbid'):
         fake_orbit_x *= self.gain_corrections_x
         fake_orbit_y *= self.gain_corrections_y
         if self.dead is not None and self.dead.any():
-            fake_orbit_x[self.dead] = noise_x[self.dead] * 10
-            fake_orbit_y[self.dead] = noise_y[self.dead] * 10
+            # Only emit dead-BPM noise where the beam actually reached the BPM.
+            # Without this guard, dead BPMs downstream of a beam-loss point would
+            # fabricate non-NaN readings, inflating transmission/reach metrics.
+            dead_alive_x = self.dead & ~np.isnan(fake_orbit_x)
+            dead_alive_y = self.dead & ~np.isnan(fake_orbit_y)
+            fake_orbit_x[dead_alive_x] = noise_x[dead_alive_x] * 10
+            fake_orbit_y[dead_alive_y] = noise_y[dead_alive_y] * 10
 
         if bba:
             # Apply BBA offsets
@@ -167,8 +172,13 @@ class BPMSystem(BaseModel, extra='forbid'):
             fake_trajectory_x *= self.gain_corrections_x
             fake_trajectory_y *= self.gain_corrections_y
             if self.dead is not None and self.dead.any():
-                fake_trajectory_x[self.dead] = noise_x[self.dead] * 10
-                fake_trajectory_y[self.dead] = noise_y[self.dead] * 10
+                # Only emit dead-BPM noise where the beam actually reached the BPM.
+                # Without this guard, dead BPMs downstream of a beam-loss point would
+                # fabricate non-NaN readings, inflating transmission/reach metrics.
+                dead_alive_x = self.dead & ~np.isnan(fake_trajectory_x)
+                dead_alive_y = self.dead & ~np.isnan(fake_trajectory_y)
+                fake_trajectory_x[dead_alive_x] = noise_x[dead_alive_x] * 10
+                fake_trajectory_y[dead_alive_y] = noise_y[dead_alive_y] * 10
 
             if bba:
                 # Apply BBA offsets
@@ -242,8 +252,13 @@ class BPMSystem(BaseModel, extra='forbid'):
             fake_trajectory_x *= self.gain_corrections_x
             fake_trajectory_y *= self.gain_corrections_y
             if self.dead is not None and self.dead.any():
-                fake_trajectory_x[self.dead] = noise_x[self.dead] * 10
-                fake_trajectory_y[self.dead] = noise_y[self.dead] * 10
+                # Only emit dead-BPM noise where the beam actually reached the BPM.
+                # Without this guard, dead BPMs downstream of a beam-loss point would
+                # fabricate non-NaN readings, inflating transmission/reach metrics.
+                dead_alive_x = self.dead & ~np.isnan(fake_trajectory_x)
+                dead_alive_y = self.dead & ~np.isnan(fake_trajectory_y)
+                fake_trajectory_x[dead_alive_x] = noise_x[dead_alive_x] * 10
+                fake_trajectory_y[dead_alive_y] = noise_y[dead_alive_y] * 10
 
             if bba:
                 # Apply BBA offsets
