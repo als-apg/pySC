@@ -1,5 +1,6 @@
 import numpy as np
 from typing import TYPE_CHECKING, Optional
+from pySC.core.xsuite_lattice import XSuiteLattice
 
 if TYPE_CHECKING:
     from pySC import SimulatedCommissioning
@@ -87,6 +88,9 @@ def get_integrated_strengths_with_feeddown(SC: "SimulatedCommissioning", use_des
             integrated_strengths['skew'][temp_max_order] = np.zeros(N)
 
         AB = (np.array(magnet.B) + 1.j*np.array(magnet.A)) * np.exp(-1.j*roll) * magnet.length #* FACTORIAL[:len(magnet.B)]
+        if isinstance(SC.lattice, XSuiteLattice):
+            AB /= FACTORIAL[:len(AB)]
+            # TODO: add test when xsuite tests get implemented.
         # AB needs to be in AT convention here, gets converted to PALS convention later.
         # TODO: in future we should use PALS only conventions
         # should integrated_strengths be complex array maybe?
