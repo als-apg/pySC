@@ -117,3 +117,11 @@ class Magnet(BaseModel, extra="forbid"):
                 self.sim_index, self.A[ii], 'A', ii, use_design=self.to_design)
             self._parent._parent.lattice.set_magnet_component(
                 self.sim_index, self.B[ii], 'B', ii, use_design=self.to_design)
+
+    def ensure_max_order(self, required_max_order: int):
+        while self.max_order < required_max_order:
+            self.max_order += 1
+            self.A.append(0.0)
+            self.B.append(0.0)
+            self.offset_A.append(0.0)
+            self.offset_B.append(0.0)

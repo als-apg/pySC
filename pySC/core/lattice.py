@@ -334,6 +334,43 @@ class ATLattice(Lattice):
         else: # when length is zero
             return 1
 
+    def ensure_max_order(self, index: int, max_order: int, use_design=True) -> None:
+        """
+        Ensure an AT lattice element supports multipoles up to ``max_order``.
+
+        Parameters
+        ----------
+        index : int
+            Index of the lattice element to extend.
+        max_order : int
+            Maximum zero-based multipole order required by the caller.
+        use_design : bool, optional
+            If `True`, extend the design lattice element. If `False`, extend
+            the active ring element.
+
+        Raises
+        ------
+        Exception
+            If the element is an AT Corrector and ``max_order`` is larger than
+            zero.
+        """
+        if use_design:
+            elem = self._design[index]
+        else:
+            elem = self._ring[index]
+
+        if type(elem) is at.Corrector:
+            if max_order > 0:
+                raise Exception('ERROR: max_order cannot be extended for at.Corrector.')
+
+        for component_type in ['A', 'B']:
+            attribute = f'Polynom{component_type}'
+            polynomial = getattr(elem, attribute)
+            if len(polynomial) <= max_order:
+                extended = np.zeros(max_order + 1, dtype=np.asarray(polynomial).dtype)
+                extended[:len(polynomial)] = polynomial
+                setattr(elem, attribute, extended)
+
     def get_magnet_component(self, index: int, component_type: Literal['A', 'B'],
                              order: int, use_design=True) -> float:
         assert component_type in ['A', 'B']

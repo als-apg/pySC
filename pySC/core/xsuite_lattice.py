@@ -327,6 +327,28 @@ class XSuiteLattice(Lattice):
         else: # when length is zero
             return 1
 
+    def ensure_max_order(self, index: int, max_order: int, use_design=True) -> None:
+        """
+        Ensure an XSuite lattice element supports multipoles up to ``max_order``.
+
+        Parameters
+        ----------
+        index : int
+            Index of the lattice element. Unused for XSuite.
+        max_order : int
+            Maximum zero-based multipole order required by the caller. Unused
+            for XSuite.
+        use_design : bool, optional
+            Selects the design lattice when `True` and the active ring when
+            `False`. Unused for XSuite.
+
+        Notes
+        -----
+        This is a no-op because XSuite component setters extend ``knl`` and
+        ``ksl`` arrays when needed.
+        """
+        pass
+
     def get_magnet_component(self, index: int, component_type: Literal['A', 'B'],
                              order: int, use_design=True) -> float:
         assert component_type in ['A', 'B']
