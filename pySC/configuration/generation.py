@@ -12,6 +12,7 @@ from .supports_conf import configure_supports
 from .tuning_conf import configure_tuning
 from .injection_conf import configure_injection
 from .general import scale_error_table
+from .multipolar_imperfections_conf import expand_multipolar_imperfections_tables
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +63,9 @@ def generate_SC(yaml_filepath: str, seed: int = 1, scale_errors: Optional[int] =
         lattice = XSuiteLattice(lattice_file=lattice_file, no_6d=no_6d)
     else:
         raise NotImplementedError(f"Simulator {config_dict['lattice']['simulator']} is not implemented.")
+
+    if 'multipolar_imperfection_tables' in config_dict:
+        expand_multipolar_imperfections_tables(config_dict)
 
     # Create the SimulatedCommissioning instance
     SC = SimulatedCommissioning(lattice=lattice, configuration=config_dict, seed=seed)
