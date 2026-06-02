@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal
+from typing import Literal, Tuple
 from pydantic import BaseModel, model_validator, PositiveInt, PositiveFloat
 import numpy as np
 
@@ -32,11 +32,18 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
     """
     Class to hold multipolar imperfections table. Uses MAD-X, XSuite, PALS conventions. 
     """
-    reference_component: Literal["B", "A"]
-    reference_order: PositiveInt  # index of A/B, starts at 1
     reference_radius: PositiveFloat
+    reference_type: Tuple[Literal["B", "A"], PositiveInt]
     bn: list[float]
     an: list[float]
+
+    @property
+    def reference_component(self) -> Literal["B", "A"]:
+        return self.reference_type[0]
+
+    @property
+    def reference_order(self) -> PositiveInt:
+        return self.reference_type[1]
 
     @property
     def reference_field(self) -> str:
