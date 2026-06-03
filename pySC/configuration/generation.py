@@ -64,7 +64,8 @@ def generate_SC(yaml_filepath: str, seed: int = 1, scale_errors: Optional[int] =
     else:
         raise NotImplementedError(f"Simulator {config_dict['lattice']['simulator']} is not implemented.")
 
-    if 'multipolar_imperfection_tables' in config_dict:
+    if 'multipolar_imperfection_models' in config_dict:
+        logger.info('Validation multipolar imperfection models...')
         expand_multipolar_imperfections_tables(config_dict)
 
     # Create the SimulatedCommissioning instance

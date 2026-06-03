@@ -58,11 +58,6 @@ class MagnetSettings(BaseModel, extra="forbid"):
 
         magnet = self.magnets[link.magnet_name]
         magnet.ensure_max_order(required_max_order=required_max_order)
-        self._parent.lattice.ensure_max_order(
-            magnet.sim_index,
-            required_max_order,
-            use_design=magnet.to_design,
-        )
         self.links[link.link_name] = link
 
     def validate_one_component(self, component: str, magnet_name: Optional[MAGNET_NAME_TYPE] = None) -> tuple[str, int]:

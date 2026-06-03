@@ -1,7 +1,9 @@
 from __future__ import annotations
-from typing import Literal, Tuple
-from pydantic import BaseModel, model_validator, PositiveInt, PositiveFloat
+from typing import Literal, Tuple, Optional, Annotated
+from pydantic import BaseModel, model_validator, PositiveInt, PositiveFloat, NonNegativeInt, Field
 import numpy as np
+
+from .rng import RNG
 
 ## factorial[n] = n!
 factorial = np.array([
@@ -49,50 +51,27 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
     def reference_field(self) -> str:
         return f"{self.reference_component}{self.reference_order}"
 
+    @property
+    def max_length(self) -> PositiveInt:
+        return max(len(self.an), len(self.bn))
+
     @model_validator(mode="after")
     def check_table_validity(self):
-        if self.reference_component == "B":
-            if not self.reference_order <= len(self.bn):
-                raise ValueError("Reference order is larger than length of bn")
-            if not self.bn[self.reference_order - 1] == 10000:
-                raise ValueError("Reference field (bn) in MultipolarImperfectionTable should be set to 10000.")
-        elif self.reference_component == "A":
-            if not self.reference_order <= len(self.an):
-                raise ValueError("Reference order is larger than length of an")
-            if not self.an[self.reference_order - 1] == 10000:
-                raise ValueError("Reference field (an) in MultipolarImperfectionTable should be set to 10000.")
-        else:
-            raise ValueError("Bug, this should not happen!")
-
-        max_length = max(len(self.an), len(self.bn))
-        while len(self.an) < max_length:
-            self.an.append(0)
-        while len(self.bn) < max_length:
-            self.bn.append(0)
-
-        if max_length > len(factorial):
-            raise NotImplementedError("length of an or bn is larger than supported (which is equal to 21).")
-
+        if len(self.bn) != len(self.an):
+            raise ValueError("bn and an must have the same length.")
+        if len(self.bn) > len(factorial):
+            raise NotImplementedError(
+                "length of an or bn is larger than supported (which is equal to 21)."
+            )
         return self
 
-    def get_Kn_Ks_over_Kref(self, convention: Literal['xsuite', 'at'] = 'xsuite'):
+    def get_Kn_Ks_over_Kref(self, convention: Literal["xsuite", "at"] = "xsuite"):
         N = len(self.bn)
         m = self.reference_order
         radius = self.reference_radius
         factor =  np.power(radius, m - 1 - np.arange(N)) * factorial[:N] / factorial[m-1] / 10000
         Kn_Kref = np.array(self.bn) * factor
         Ks_Kref = np.array(self.an) * factor
-
-        if self.reference_component == "B":
-            if not np.isclose(Kn_Kref[m-1], 1, atol=1e-15):
-                raise ValueError("BUG: Kref/Kref not equal to 1.")
-            Kn_Kref[m-1] = 0
-        elif self.reference_component == "A":
-            if not np.isclose(Ks_Kref[m-1], 1, atol=1e-15):
-                raise ValueError("BUG: Kref/Kref not equal to 1.")
-            Ks_Kref[m-1] = 0
-        else:
-            raise Exception("Bug, this should not happen!")
 
         if convention not in ['xsuite', 'at']:
             raise NotImplementedError(f"Unknown convention {convention}.")
@@ -102,3 +81,138 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
             Ks_Kref /= factorial[:N] / factorial[m-1]
 
         return Kn_Kref, Ks_Kref
+
+class ImperfectionsModel(BaseModel, extra="forbid"):
+    list_of_tables: Annotated[list[MultipolarImperfectionTable], Field(min_length=1)]
+
+    @property
+    def max_order(self) -> NonNegativeInt:
+        return max([mit.max_length for mit in self.list_of_tables]) - 1
+
+    def apply(self, Kn: list, Ks: list, convention: Literal["xsuite", "at"] = "xsuite"):
+        Kn_in = np.array(Kn)
+        Ks_in = np.array(Ks)
+        max_table_length = max([mit.max_length for mit in self.list_of_tables])
+        max_length = max(len(Kn_in), len(Ks_in), max_table_length)
+        Kn_out = np.zeros(max_length)
+        Ks_out = np.zeros(max_length)
+        Kn_out[:len(Kn_in)] += Kn_in
+        Ks_out[:len(Ks_in)] += Ks_in
+        for table in self.list_of_tables:
+            Kn_Kref, Ks_Kref = table.get_Kn_Ks_over_Kref(convention=convention)
+            if table.reference_component == "B":
+                Kref = Kn_in[table.reference_order - 1]
+            elif table.reference_component == "A":
+                Kref = Ks_in[table.reference_order - 1]
+            else:
+                raise ValueError(f"Unknown reference component: {table.reference_component}.")
+            Kn_out[:len(Kn_Kref)] += Kn_Kref * Kref
+            Ks_out[:len(Kn_Kref)] += Ks_Kref * Kref
+        return list(Kn_out), list(Ks_out)
+
+class MultipolarImperfectionTableFactory(BaseModel, extra="forbid"):
+    reference_radius: PositiveFloat
+    reference_type: Tuple[Literal["B", "A"], PositiveInt]
+    mean_bn: Optional[list[float]] = None
+    mean_an: Optional[list[float]] = None
+    std_bn: Optional[list[float]] = None
+    std_an: Optional[list[float]] = None
+
+    @property
+    def max_length(self) -> PositiveInt:
+        lengths = [len(comp) for comp in [self.mean_bn, self.mean_an, self.std_bn, self.std_an] if comp is not None]
+        return max(lengths)
+    @property
+    def reference_component(self) -> Literal["B", "A"]:
+        return self.reference_type[0]
+
+    @property
+    def reference_order(self) -> PositiveInt:
+        return self.reference_type[1]
+
+    @model_validator(mode="after")
+    def check_table_validity(self):
+        if self.mean_bn is None and self.mean_an is None and self.std_bn is None and self.std_an is None:
+            raise ValueError("At least one of mean_bn, mean_an, std_bn, std_an should be specified.")
+        if self.reference_component == "B":
+            if self.mean_bn is None and self.std_bn is None:
+                raise ValueError("At least one of mean_bn, std_bn, should be specified, since the reference component is B.")
+            if self.mean_bn is not None:
+                if not self.reference_order <= len(self.mean_bn):
+                    raise ValueError("Reference order is larger than length of systematic_bn")
+            if self.std_bn is not None:
+                if not self.reference_order <= len(self.std_bn):
+                    raise ValueError("Reference order is larger than length of random_bn")
+        elif self.reference_component == "A":
+            if self.mean_an is None and self.std_an is None:
+                raise ValueError("At least one of mean_an, std_an, should be specified, since the reference component is A.")
+            if self.mean_an is not None:
+                if not self.reference_order <= len(self.mean_an):
+                    raise ValueError("Reference order is larger than length of systematic_an")
+            if self.std_an is not None:
+                if not self.reference_order <= len(self.std_an):
+                    raise ValueError("Reference order is larger than length of random_an")
+        else:
+            raise ValueError("Bug, this should not happen!")
+
+        max_length = self.max_length
+        # create missing lists
+        if self.mean_an is None:
+            self.mean_an = [0] * max_length
+        if self.mean_bn is None:
+            self.mean_bn = [0] * max_length
+        if self.std_bn is None:
+            self.std_bn = [0] * max_length
+        if self.std_an is None:
+            self.std_an = [0] * max_length
+
+        # make all lists the same length
+        while len(self.mean_an) < max_length:
+            self.mean_an.append(0)
+        while len(self.mean_bn) < max_length:
+            self.mean_bn.append(0)
+        while len(self.std_an) < max_length:
+            self.std_an.append(0)
+        while len(self.std_bn) < max_length:
+            self.std_bn.append(0)
+
+        # reject tables that are all-zero
+        total = np.sum(np.abs(self.mean_bn) + np.abs(self.mean_an) 
+                       + np.abs(self.std_bn) + np.abs(self.std_an) )
+        if np.isclose(total, 0, atol=1e-15):
+            raise ValueError("MultipolarImperfectionTable is all-zero.")
+
+        # remove trailing zeros in bn, an
+        while (
+            self.mean_bn[len(self.mean_bn) - 1] == 0
+            and self.mean_an[len(self.mean_an) - 1] == 0
+            and self.std_bn[len(self.std_bn) - 1] == 0
+            and self.std_an[len(self.std_an) - 1] == 0
+        ):
+            del self.mean_bn[len(self.mean_bn) - 1]
+            del self.mean_an[len(self.mean_an) - 1]
+            del self.std_bn[len(self.std_bn) - 1]
+            del self.std_an[len(self.std_an) - 1]
+
+        if max_length > len(factorial):
+            raise NotImplementedError("length of an or bn is larger than supported (which is equal to 21).")
+
+        return self
+
+    def create(self, rng: RNG) -> MultipolarImperfectionTable:
+        total_bn = np.array(self.mean_bn) + rng.normal_trunc(size=self.max_length) * np.array(self.std_bn)
+        total_an = np.array(self.mean_an) + rng.normal_trunc(size=self.max_length) * np.array(self.std_an)
+        mit = MultipolarImperfectionTable(reference_radius=self.reference_radius,
+                                          reference_type=self.reference_type,
+                                          bn=total_bn,
+                                          an=total_an,
+                                          )
+        return mit
+
+class ImperfectionsModelFactory(BaseModel, extra="forbid"):
+    factories: Annotated[list[MultipolarImperfectionTableFactory], Field(min_length=1)]
+
+    def create(self, rng: RNG) -> ImperfectionsModel:
+        list_of_tables = [factory.create(rng) for factory in self.factories]
+        model = ImperfectionsModel(list_of_tables=list_of_tables)
+        return model

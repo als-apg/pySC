@@ -1,12 +1,9 @@
 from typing import Any
-import numpy as np
 import logging
 from ..core.simulated_commissioning import SimulatedCommissioning
 from ..core.lattice import ATLattice
-from ..core.xsuite_lattice import XSuiteLattice
-from ..core.magnet import MAGNET_NAME_TYPE, ControlMagnetLink
-from ..core.control import LinearConv
-from ..core.multipolar_imperfections import MultipolarImperfectionTable
+from ..core.magnet import MAGNET_NAME_TYPE
+from ..core.multipolar_imperfections import ImperfectionsModelFactory
 from .general import get_error, get_indices_and_names
 from .supports_conf import generate_element_misalignments
 
@@ -94,69 +91,15 @@ def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magn
 
     return new_control_list
 
-def generate_multipolar_imperfection_table_links(SC: SimulatedCommissioning, magnet_names: list[MAGNET_NAME_TYPE],
-                                           multipolar_imperfection_table: MultipolarImperfectionTable,
-                                           available_controls: list[str], magnet_category_name: str,
-                                           mode='random'):
-    reference_field = multipolar_imperfection_table.reference_field #B1, B2 ...
-    if isinstance(SC.lattice, ATLattice):
-        Kn_Kref, Ks_Kref = multipolar_imperfection_table.get_Kn_Ks_over_Kref(convention='at')
-    elif isinstance(SC.lattice, XSuiteLattice):
-        Kn_Kref, Ks_Kref = multipolar_imperfection_table.get_Kn_Ks_over_Kref(convention='xsuite')
-    else:
-        raise ValueError("SC.lattice is neither ATLattice nor XSuiteLattice.")
-
-    if reference_field in available_controls:
-        suffix = ""
-        is_integrated = False
-    elif f"{reference_field}L" in available_controls:
-        suffix = "L"
-        is_integrated = True
-    else:
-        raise Exception(f"Reference field {reference_field} not found in available controls {available_controls} of {magnet_category_name}.")
-    for magnet_name in magnet_names:
-        control_name = f"{magnet_name}/{reference_field}{suffix}"
-        original_control_link_name = f"{control_name}->{control_name}"
-        original_control_link = SC.magnet_settings.links[original_control_link_name]
-        if not isinstance(original_control_link.error, LinearConv):
-            raise NotImplementedError
-        factor0 = original_control_link.error.factor
-        offset0 = original_control_link.error.offset
-        for comp, K_Kref in zip(["B", "A"], [Kn_Kref, Ks_Kref]):
-            for ii, K in enumerate(K_Kref):
-                order = ii + 1
-                if np.isclose(K, 0, 1e-15):
-                    continue
-                link = ControlMagnetLink(
-                    link_name=f"{control_name}->{magnet_name}/{comp}{order}{suffix}",
-                    magnet_name=magnet_name,
-                    control_name=control_name,
-                    component=comp,
-                    order=order,
-                    is_integrated=is_integrated
-                )
-                if mode == 'random':
-                    factor = K * SC.rng.normal_trunc()
-                elif mode == 'systematic':
-                    factor = K
-                else:
-                    raise ValueError(f"Unknown mode for multipolar imperfection link: {mode}.")
-                link.error.factor = factor * factor0
-                link.error.offset = factor * offset0
-                SC.magnet_settings.add_link(link)
-
-
 def configure_magnets(SC: SimulatedCommissioning):
     # get magnets configuration, return empty dict if not there
     magnet_conf = dict.get(SC.configuration, 'magnets', {})
 
-    if 'multipolar_imperfection_tables' in SC.configuration:
-        multipolar_imperfection_tables = dict.get(SC.configuration, 'multipolar_imperfection_tables')
-        MITs : dict[str, dict[str, MultipolarImperfectionTable]] = {}
-        for table_name in multipolar_imperfection_tables:
-            table_object = multipolar_imperfection_tables[table_name]
-            MITs[table_name] = {key: MultipolarImperfectionTable.model_validate(table_object[key]) 
-                                for key in table_object}
+    if 'multipolar_imperfection_models' in SC.configuration:
+        multipolar_imperfection_models = dict.get(SC.configuration, 'multipolar_imperfection_models')
+        imperfection_model_factories: dict[str, ImperfectionsModelFactory] = {}
+        for model_name, model_object in multipolar_imperfection_models.items():
+            imperfection_model_factories[model_name] = ImperfectionsModelFactory.model_validate({'factories': model_object})
 
     for magnet_category_name in magnet_conf.keys():
         magnet_category_conf = magnet_conf[magnet_category_name]
@@ -177,41 +120,20 @@ def configure_magnets(SC: SimulatedCommissioning):
         SC.control_arrays[magnet_category_name] = control_list
 
         if 'imperfections' in magnet_category_conf:
-            if 'multipolar_imperfection_tables' not in SC.configuration:
-                raise Exception("'multipolar_imperfection_tables' not found in configuration.")
+            if 'multipolar_imperfection_models' not in SC.configuration:
+                raise Exception("'multipolar_imperfection_models' not found in configuration.")
 
-            imperfections_conf = magnet_category_conf['imperfections']
+            imperfections_model_name = magnet_category_conf['imperfections']
+            for magnet_name in magnet_names:
+                if SC.magnet_settings.magnets[magnet_name].imperfections is not None:
+                    raise Exception(f"Magnet {magnet_name} of {magnet_category_name} already has an imperfections model.")
+                if imperfections_model_name not in imperfection_model_factories:
+                    raise ValueError(f"{imperfections_model_name} not found in the multipolar imperfection models.")
+                factory = imperfection_model_factories[imperfections_model_name]
+                SC.magnet_settings.magnets[magnet_name].imperfections = factory.create(SC.rng)
 
-            # gather available controls for magnet
-            comp_dict_list = magnet_category_conf['components']
-            available_controls = []
-            for comp_dict in comp_dict_list:
-                component, _ = comp_dict.copy().popitem()
-                available_controls.append(component)
-
-            if 'random' in imperfections_conf:
-                list_of_tables_random = imperfections_conf['random']
-                for table in list_of_tables_random:
-                    if table not in MITs:
-                        raise ValueError(f"Random multipolar imperfection table '{table}' was not declared.")
-                    MIT_list = list(MITs[table].values())
-                    for MIT in MIT_list:
-                        generate_multipolar_imperfection_table_links(SC, magnet_names, MIT,
-                                                               available_controls,
-                                                               magnet_category_name,
-                                                               mode='random')
-
-            if 'systematic' in imperfections_conf:
-                list_of_tables_systematic = imperfections_conf['systematic']
-                for table in list_of_tables_systematic:
-                    if table not in MITs:
-                        raise ValueError(f"Systematic multipolar imperfection table '{table}' was not declared.")
-                    MIT_list = list(MITs[table].values())
-                    for MIT in MIT_list:
-                        generate_multipolar_imperfection_table_links(SC, magnet_names, MIT,
-                                                               available_controls,
-                                                               magnet_category_name,
-                                                               mode='systematic')
+                required_max_order = SC.magnet_settings.magnets[magnet_name].imperfections.max_order
+                SC.magnet_settings.magnets[magnet_name].ensure_max_order(required_max_order=required_max_order)
 
     SC.magnet_settings.connect_links()
     SC.magnet_settings.sendall()
