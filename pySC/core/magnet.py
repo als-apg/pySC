@@ -1,8 +1,14 @@
 from __future__ import annotations
-from typing import Literal, Optional, Union, Any
+from typing import Literal, Optional, Union, Any, TYPE_CHECKING
 from pydantic import BaseModel, model_validator, PrivateAttr, PositiveInt, NonNegativeInt
 import logging
 from .control import Control, LinearConv
+from .multipolar_imperfections import ImperfectionsModel
+from .lattice import ATLattice
+from .xsuite_lattice import XSuiteLattice
+
+if TYPE_CHECKING:
+    from .simulated_commissioning import SimulatedCommissioning
 
 MAGNET_NAME_TYPE = Union[str, int]
 
@@ -30,6 +36,7 @@ class Magnet(BaseModel, extra="forbid"):
     offset_B: Optional[list[float]] = None
     to_design: bool = False
     length: Optional[float] = None
+    imperfections: Optional[ImperfectionsModel] = None
     _links: list[ControlMagnetLink] = PrivateAttr(default=[])
     _parent = PrivateAttr(default=None)
 
@@ -112,8 +119,29 @@ class Magnet(BaseModel, extra="forbid"):
                     f"Invalid component '{link.component}' for magnet '{self.name}'"
                 )
 
+        if self.imperfections is not None:
+            SC: "SimulatedCommissioning" = self._parent._parent
+            if isinstance(SC.lattice, ATLattice):
+                convention = 'at'
+            elif isinstance(SC.lattice, XSuiteLattice):
+                convention = 'xsuite'
+            else:
+                raise ValueError(f"Unknown lattice type {type(SC.lattice)}.")
+            Brho = SC.lattice.get_Brho()
+            self.B, self.A = self.imperfections.apply(self.B, self.A, Brho=Brho, convention=convention)
+
         for ii in range(self.max_order + 1):
             self._parent._parent.lattice.set_magnet_component(
                 self.sim_index, self.A[ii], 'A', ii, use_design=self.to_design)
             self._parent._parent.lattice.set_magnet_component(
                 self.sim_index, self.B[ii], 'B', ii, use_design=self.to_design)
+
+    def ensure_max_order(self, required_max_order: int):
+        while self.max_order < required_max_order:
+            self.max_order += 1
+            self.A.append(0.0)
+            self.B.append(0.0)
+            self.offset_A.append(0.0)
+            self.offset_B.append(0.0)
+        SC: "SimulatedCommissioning" = self._parent._parent
+        SC.lattice.ensure_max_order(self.sim_index, required_max_order, self.to_design)

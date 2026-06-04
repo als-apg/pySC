@@ -112,6 +112,14 @@ def test_get_chromaticity(hmba_lattice_file):
     assert np.isfinite(dqy)
 
 
+def test_get_brho_returns_at_lattice_brho(hmba_lattice_file):
+    """get_Brho() returns AT's magnetic rigidity for ring and design lattices."""
+    lat = ATLattice(lattice_file=hmba_lattice_file)
+
+    assert lat.get_Brho(use_design=True) == pytest.approx(lat.design.BRho)
+    assert lat.get_Brho(use_design=False) == pytest.approx(lat.ring.BRho)
+
+
 # ---------------------------------------------------------------------------
 # Tracking
 # ---------------------------------------------------------------------------
