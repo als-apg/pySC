@@ -62,6 +62,106 @@ The ``parameters`` table is currently used by magnet ``limits`` entries:
        limits:
          - B2: quad_limit
 
+``multipolar_imperfection_models``
+   Defines optional multipolar field-error models that can be attached to magnet
+   families. A model is an ordered list of imperfection entries. Each entry is
+   either a table model or a curve model. Models can be written inline in the
+   main configuration file or loaded from a YAML file.
+
+This top-level section is optional. Omit it when no magnet family should receive
+multipolar imperfection errors.
+
+For example, a file-based model:
+
+.. code-block:: yaml
+
+   multipolar_imperfection_models:
+     quad_body_errors: quad_multipolar_errors.yaml
+
+The referenced file contains a list of table and/or curve entries:
+
+.. code-block:: yaml
+
+   - reference_radius: 0.0065
+     reference_type: [B, 2]
+     mean_bn: [0, 0, 10]
+     mean_an: [0, 0, 0]
+     std_bn: [0, 0, 2]
+     std_an: [0, 0, 0]
+
+   - reference_radius: 0.0065
+     reference_type: [B, 2]
+     source_type: [B, 2]
+     target_type: [b, 6]
+     source: [0.4435, 0.6192, 0.6996, 0.7623]
+     target: [1.740, 1.360, 0.820, 0.000]
+
+The same model can be written inline:
+
+.. code-block:: yaml
+
+   multipolar_imperfection_models:
+     quad_body_errors:
+       - reference_radius: 0.0065
+         reference_type: [B, 2]
+         mean_bn: [0, 0, 10]
+         mean_an: [0, 0, 0]
+         std_bn: [0, 0, 2]
+         std_an: [0, 0, 0]
+
+       - reference_radius: 0.0065
+         reference_type: [B, 2]
+         source_type: [B, 2]
+         target_type: [b, 6]
+         source: [0.4435, 0.6192, 0.6996, 0.7623]
+         target: [1.740, 1.360, 0.820, 0.000]
+
+A table model describes normalized harmonic errors relative to a reference
+component:
+
+``reference_radius``
+   Reference radius in meters used when converting normalized harmonics to
+   lattice strengths.
+
+``reference_type``
+   Reference component and order as ``[B, n]`` or ``[A, n]``. For example,
+   ``[B, 2]`` means the normal quadrupole component is used as the reference.
+
+``mean_bn`` and ``mean_an``
+   Systematic normal and skew normalized harmonics in units of :math:`10^{-4}`.
+   The first entry is the dipole harmonic, the second is the quadrupole harmonic,
+   and so on.
+
+``std_bn`` and ``std_an``
+   Random normal and skew normalized harmonics in units of :math:`10^{-4}`.
+   A fresh random table is generated for each magnet that receives the model.
+
+The ``mean_*`` and ``std_*`` arrays may have different lengths. Missing arrays
+are treated as zero arrays, shorter arrays are padded with zeros, and trailing
+all-zero harmonics are removed.
+
+A curve model describes a deterministic interpolation from a source field
+harmonic to a target normalized harmonic:
+
+``source_type``
+   Source lattice component and order as ``[B, n]`` or ``[A, n]``. The runtime
+   value of this component is converted to a physical field harmonic and used as
+   the interpolation input.
+
+``target_type``
+   Target normalized harmonic as ``[b, n]`` or ``[a, n]``. Lowercase
+   ``b``/``a`` indicates that the curve target is normalized and will be
+   converted back to lattice ``B``/``A`` strengths.
+
+``source`` and ``target``
+   Interpolation arrays. ``source`` must be positive and strictly increasing.
+   ``target`` is the normalized harmonic value corresponding to each source
+   point, again in units of :math:`10^{-4}`.
+
+Curve models are useful when the harmonic error is not well described by a
+constant normalized table but is measured or specified as a function of the
+magnet's operating point.
+
 2. Select the lattice
 ---------------------
 
@@ -161,6 +261,11 @@ Supported magnet-family options are:
    Optional control limits. Each listed component references a value from the
    top-level ``parameters`` table.
 
+``imperfections``
+   Optional name of a top-level ``multipolar_imperfection_models`` entry. The
+   model is instantiated separately for every magnet in the family and applied
+   whenever the magnet settings are sent to the lattice.
+
 ``dx``, ``dy``, ``dz``, ``roll``, ``yaw``, ``pitch``
    Optional element misalignment entries. Each value must reference an
    ``error_table`` entry.
@@ -190,6 +295,26 @@ simulation convention. Every inverted component must also be listed under
          - A1: magnet_calibration
        invert:
          - B1
+
+Attach a multipolar imperfection model by referencing the model name:
+
+.. code-block:: yaml
+
+   multipolar_imperfection_models:
+     quad_body_errors: quad_multipolar_errors.yaml
+
+   magnets:
+     quadrupoles:
+       regex: ^Q
+       components:
+         - B2: magnet_calibration
+       imperfections: quad_body_errors
+
+The referenced model must provide any harmonics that the family needs. pySC
+extends the internal magnet order and the underlying lattice element as needed
+before applying the model.
+
+The ``imperfections`` field is optional for each magnet family.
 
 4. Declare BPMs
 ---------------
