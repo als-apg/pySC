@@ -341,6 +341,79 @@ class MultipolarImperfectionTableFactory(BaseModel, extra="forbid"):
                                           )
         return mit
 
+class MultipolarImperfectionCurveFactory(BaseModel, extra="forbid"):
+    """
+    Factory for deterministic multipolar imperfection curves.
+
+    Curves map a source field harmonic to a target normalized harmonic using
+    interpolation.
+    """
+
+    reference_radius: PositiveFloat
+    reference_type: Tuple[Literal["B", "A"], PositiveInt]
+    source_type: Tuple[Literal["B", "A"], PositiveInt]
+    target_type: Tuple[Literal["b", "a"], PositiveInt]
+    source: list[float]
+    target: list[float]
+
+    @property
+    def max_length(self) -> PositiveInt:
+        return max(
+            self.source_type[1],
+            self.target_type[1],
+            self.reference_type[1],
+        )
+
+    @model_validator(mode="after")
+    def check_curve_validity(self):
+        if len(self.source) != len(self.target):
+            raise ValueError("source and target must have the same length.")
+
+        source = np.asarray(self.source, dtype=float)
+        target = np.asarray(self.target, dtype=float)
+
+        if len(source) < 2:
+            raise ValueError("source and target must contain at least two points.")
+
+        if not np.all(source > 0):
+            raise ValueError(
+                "source in MultipolarImperfectionCurve must be all positive."
+            )
+
+        if not np.all(np.diff(source) > 0):
+            raise ValueError(
+                "source in MultipolarImperfectionCurve must be strictly increasing."
+            )
+
+        if not np.all(np.isfinite(source)) or not np.all(np.isfinite(target)):
+            raise ValueError("source and target must contain only finite values.")
+
+        return self
+
+    def create(self, rng: Optional[RNG] = None) -> MultipolarImperfectionCurve:
+        """
+        Create a multipolar imperfection curve.
+
+        Parameters
+        ----------
+        rng : RNG, optional
+            Accepted for interface compatibility with table factories. It is not
+            used because curves are deterministic.
+
+        Returns
+        -------
+        MultipolarImperfectionCurve
+            Validated curve object.
+        """
+        return MultipolarImperfectionCurve(
+            reference_radius=self.reference_radius,
+            reference_type=self.reference_type,
+            source_type=self.source_type,
+            target_type=self.target_type,
+            source=self.source,
+            target=self.target,
+        )
+
 class ImperfectionsModelFactory(BaseModel, extra="forbid"):
     factories: Annotated[list[MultipolarImperfectionTableFactory], Field(min_length=1)]
 
