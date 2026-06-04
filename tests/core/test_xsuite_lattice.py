@@ -2,6 +2,8 @@
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
+from scipy.constants import c as clight
 
 from pySC.core.xsuite_lattice import XSuiteLattice
 
@@ -71,3 +73,14 @@ def test_xsuite_get_twiss_exposes_chromatic_keys():
         'dmux', 'dmuy', 'ddx',
     ]:
         np.testing.assert_array_equal(twiss[key], getattr(twiss_result, key))
+
+
+def test_xsuite_get_brho_uses_particle_ref_p0c():
+    """get_Brho() returns particle_ref.p0c / c."""
+    p0c = np.array([6.0e9])
+    line = SimpleNamespace(particle_ref=SimpleNamespace(p0c=p0c))
+    lattice = XSuiteLattice.model_construct(lattice_file="dummy.json", no_6d=False)
+    lattice._design = line
+    lattice._ring = line
+
+    assert lattice.get_Brho(use_design=True) == pytest.approx(p0c[0] / clight)
