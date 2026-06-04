@@ -17,8 +17,6 @@ These examples run against the in-repo HMBA model. Run them from the
    example_scripts/orbit_bba_first_10_bpms
    example_scripts/orbit_bba_multiple_threads_first_10_bpms
    example_scripts/save_and_reload_sc
-<<<<<<< HEAD
-=======
 
 Measurements in operation
 -------------------------
@@ -35,4 +33,3 @@ hardware.
    example_scripts/operation_correct_orbit
    example_scripts/operation_measure_ORM
    example_scripts/operation_measure_BBA
->>>>>>> docs
