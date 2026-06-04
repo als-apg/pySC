@@ -414,10 +414,15 @@ class MultipolarImperfectionCurveFactory(BaseModel, extra="forbid"):
             target=self.target,
         )
 
+IMPERFECTION_FACTORY_TYPES = Union[
+    MultipolarImperfectionTableFactory,
+    MultipolarImperfectionCurveFactory,
+]
+
 class ImperfectionsModelFactory(BaseModel, extra="forbid"):
-    factories: Annotated[list[MultipolarImperfectionTableFactory], Field(min_length=1)]
+    factories: Annotated[list[IMPERFECTION_FACTORY_TYPES], Field(min_length=1)]
 
     def create(self, rng: RNG) -> ImperfectionsModel:
-        list_of_tables = [factory.create(rng) for factory in self.factories]
-        model = ImperfectionsModel(list_of_imperfections=list_of_tables)
+        list_of_imperfections = [factory.create(rng) for factory in self.factories]
+        model = ImperfectionsModel(list_of_imperfections=list_of_imperfections)
         return model
