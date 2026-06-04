@@ -127,7 +127,8 @@ class Magnet(BaseModel, extra="forbid"):
                 convention = 'xsuite'
             else:
                 raise ValueError(f"Unknown lattice type {type(SC.lattice)}.")
-            self.B, self.A = self.imperfections.apply(self.B, self.A, convention=convention)
+            Brho = SC.lattice.get_Brho()
+            self.B, self.A = self.imperfections.apply(self.B, self.A, Brho=Brho, convention=convention)
 
         for ii in range(self.max_order + 1):
             self._parent._parent.lattice.set_magnet_component(

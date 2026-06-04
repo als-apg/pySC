@@ -591,3 +591,23 @@ class XSuiteLattice(Lattice):
 
     def get_name_from_index(self, index: int):
         return self.design.element_names[index]
+
+    def get_Brho(self, use_design: bool = False) -> float:
+        """
+        Return the magnetic rigidity of the reference particle.
+    
+        Parameters
+        ----------
+        use_design : bool, optional
+            If True, use the design lattice. Otherwise, use the active lattice.
+    
+        Returns
+        -------
+        float
+            Magnetic rigidity in T m.
+        """
+        line = self._design if use_design else self._ring
+        if line.particle_ref is None:
+            raise ValueError("Xsuite lattice has no particle_ref. Cannot compute Brho.")
+    
+        return float(line.particle_ref.p0c[0]) / clight

@@ -479,3 +479,20 @@ class ATLattice(Lattice):
             elem = self._ring[index]
 
         update_transformation(elem, dx=dx, dy=dy, dz=dz, roll=roll, yaw=yaw, pitch=pitch)
+
+    def get_Brho(self, use_design: bool = False) -> float:
+        """
+        Return the magnetic rigidity of the reference particle.
+
+        Parameters
+        ----------
+        use_design : bool, optional
+            If True, use the design lattice. Otherwise, use the active lattice.
+
+        Returns
+        -------
+        float
+            Magnetic rigidity in T m.
+        """
+        ring = self._design if use_design else self._ring
+        return ring.BRho

@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Literal, Tuple, Optional, Annotated
+from typing import Literal, Tuple, Optional, Annotated, Union
 from pydantic import BaseModel, model_validator, PositiveInt, PositiveFloat, NonNegativeInt, Field
 import numpy as np
 
@@ -82,7 +82,7 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
 
         return Kn_Kref, Ks_Kref
 
-    def get_Kn_Ks(self, Kn_in: np.ndarray, Ks_in: np.ndarray,
+    def get_Kn_Ks(self, Kn_in: np.ndarray, Ks_in: np.ndarray, Brho: Optional[PositiveFloat] = None,
                   convention: Literal["xsuite", "at"] = "xsuite") -> Tuple[np.ndarray, np.ndarray]:
         Kn_Kref, Ks_Kref = self.get_Kn_Ks_over_Kref(convention=convention)
         if self.reference_component == "B":
@@ -95,24 +95,149 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
         Ks = Ks_Kref * Kref
         return Kn, Ks
 
+class MultipolarImperfectionCurve(BaseModel, extra="forbid"):
+    """
+    Class to hold multipolar imperfections curve. Uses MAD-X, XSuite, PALS conventions. 
+    """
+    reference_radius: PositiveFloat
+    reference_type: Tuple[Literal["B", "A"], PositiveInt]
+    source_type: Tuple[Literal["B", "A"], PositiveInt]
+    target_type: Tuple[Literal["b", "a"], PositiveInt]
+    source: list[float]
+    target: list[float]
+
+    @property
+    def reference_component(self) -> Literal["B", "A"]:
+        return self.reference_type[0]
+
+    @property
+    def reference_order(self) -> PositiveInt:
+        return self.reference_type[1]
+
+    @property
+    def reference_field(self) -> str:
+        return f"{self.reference_component}{self.reference_order}"
+
+    @property
+    def source_component(self) -> Literal["B", "A"]:
+        return self.source_type[0]
+
+    @property
+    def source_order(self) -> PositiveInt:
+        return self.source_type[1]
+
+    @property
+    def source_field(self) -> str:
+        return f"{self.source_component}{self.source_order}"
+
+    @property
+    def target_component(self) -> Literal["b", "a"]:
+        return self.target_type[0]
+
+    @property
+    def target_order(self) -> PositiveInt:
+        return self.target_type[1]
+
+    @property
+    def target_field(self) -> str:
+        return f"{self.target_component}{self.target_order}"
+
+    @property
+    def max_length(self) -> PositiveInt:
+        return max(self.source_order, self.target_order, self.reference_order)
+
+    @model_validator(mode="after")
+    def check_table_validity(self):
+        if len(self.source) != len(self.target):
+            raise ValueError("source and target must have the same length.")
+        if not np.all(np.array(self.source) > 0):
+            raise ValueError("source in MultipolarImperfectionCurve is not all positive. If the curve is truly not symmetric w.r.t. zero please contact support.")
+        if not np.all(np.diff(self.source) > 0):
+            raise ValueError("source in MultipolarImperfectionCurve is not monotonic in ascending order.")
+        return self
+
+    def get_harmonic_from_K(self, Kn_in: np.ndarray, Ks_in: np.ndarray, 
+                            order: PositiveInt, component: Literal['A','B'], Brho: PositiveFloat,
+                            convention: Literal["xsuite", "at"] = "xsuite") -> float:
+        if component == "B":
+            lattice_value = Kn_in[order - 1]
+        elif component == "A":
+            lattice_value = Ks_in[order - 1]
+        else:
+            raise ValueError(f"Unknown source component: {component}. (Should be equal to B or A.)")
+
+        if convention == 'at':
+            # convert to MADX/XSuite convention.
+            lattice_value *= factorial[order - 1] 
+
+        # convert to harmonic
+        harmonic = Brho * ( self.reference_radius ** (order - 1) ) / factorial[order - 1] * lattice_value
+        return harmonic
+
+    def get_Kn_Ks(self, Kn_in: np.ndarray, Ks_in: np.ndarray, Brho: PositiveFloat,
+                  convention: Literal["xsuite", "at"] = "xsuite") -> Tuple[np.ndarray, np.ndarray]:
+
+        source_value = self.get_harmonic_from_K(Kn_in=Kn_in, Ks_in=Ks_in, order=self.source_order,
+                                                component=self.source_component, Brho=Brho,
+                                                convention=convention)
+ 
+        # Here we assume the "source array" will be all positive. We take the absolute value for the calculation of the target an or bn.
+        # The correct sign will be carried to the real field when converting an/bn -> An/Bn -> Kn, Ks
+        source_value = abs(source_value)
+
+        if source_value < self.source[0] or source_value > self.source[-1]:
+            raise ValueError('source_value is outside source array from the configuration!')
+
+        # interpolate to get target
+        target_ab = np.interp(source_value, self.source, self.target)
+
+        # get Bref reference for conversion
+        Bref = self.get_harmonic_from_K(Kn_in=Kn_in, Ks_in=Ks_in, order=self.reference_order,
+                                        component=self.reference_component, Brho=Brho, 
+                                        convention=convention)
+
+        # convert bm/am to Bm/Am
+        target_AB = target_ab / 10000 * Bref
+
+        target_KnKs = target_AB / Brho / ( self.reference_radius ** (self.target_order - 1) ) * factorial[self.target_order - 1]
+
+        if convention == 'at':
+            # convert to MADX/XSuite convention.
+            target_KnKs /= factorial[self.target_order - 1] 
+
+        max_length = self.max_length
+        Kn = np.zeros(max_length)
+        Ks = np.zeros(max_length)
+
+        if self.target_component == "b":
+            Kn[self.target_order - 1] = target_KnKs
+        elif self.target_component == "a":
+            Ks[self.target_order - 1] = target_KnKs
+        else:
+            raise ValueError(f"Unknown target component: {self.target_component}. (Should be equal to b or a.)")
+
+        return Kn, Ks
+
+IMPERFECTION_TYPES = Union[MultipolarImperfectionTable, MultipolarImperfectionCurve]
+
 class ImperfectionsModel(BaseModel, extra="forbid"):
-    list_of_tables: Annotated[list[MultipolarImperfectionTable], Field(min_length=1)]
+    list_of_imperfections: Annotated[list[IMPERFECTION_TYPES], Field(min_length=1)]
 
     @property
     def max_order(self) -> NonNegativeInt:
-        return max([mit.max_length for mit in self.list_of_tables]) - 1
+        return max([mit.max_length for mit in self.list_of_imperfections]) - 1
 
-    def apply(self, Kn: list, Ks: list, convention: Literal["xsuite", "at"] = "xsuite"):
+    def apply(self, Kn: list, Ks: list, Brho: PositiveFloat, convention: Literal["xsuite", "at"] = "xsuite"):
         Kn_in = np.array(Kn)
         Ks_in = np.array(Ks)
-        max_table_length = max([mit.max_length for mit in self.list_of_tables])
+        max_table_length = max([mit.max_length for mit in self.list_of_imperfections])
         max_length = max(len(Kn_in), len(Ks_in), max_table_length)
         Kn_out = np.zeros(max_length)
         Ks_out = np.zeros(max_length)
         Kn_out[:len(Kn_in)] += Kn_in
         Ks_out[:len(Ks_in)] += Ks_in
-        for table in self.list_of_tables:
-            Kn_temp, Ks_temp = table.get_Kn_Ks(Kn_in=Kn_in, Ks_in=Ks_in, convention=convention)
+        for table in self.list_of_imperfections:
+            Kn_temp, Ks_temp = table.get_Kn_Ks(Kn_in=Kn_in, Ks_in=Ks_in, Brho=Brho, convention=convention)
             Kn_out[:len(Kn_temp)] += Kn_temp
             Ks_out[:len(Ks_temp)] += Ks_temp
         return list(Kn_out), list(Ks_out)
@@ -221,5 +346,5 @@ class ImperfectionsModelFactory(BaseModel, extra="forbid"):
 
     def create(self, rng: RNG) -> ImperfectionsModel:
         list_of_tables = [factory.create(rng) for factory in self.factories]
-        model = ImperfectionsModel(list_of_tables=list_of_tables)
+        model = ImperfectionsModel(list_of_imperfections=list_of_tables)
         return model
