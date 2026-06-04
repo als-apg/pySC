@@ -65,11 +65,11 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
             )
         return self
 
-    def get_Kn_Ks_over_Kref(self, convention: Literal["xsuite", "at"] = "xsuite"):
+    def get_Kn_Ks_over_Kref(self, convention: Literal["xsuite", "at"] = "xsuite") -> Tuple[np.ndarray, np.ndarray]:
         N = len(self.bn)
         m = self.reference_order
         radius = self.reference_radius
-        factor =  np.power(radius, m - 1 - np.arange(N)) * factorial[:N] / factorial[m-1] / 10000
+        factor: np.ndarray =  np.power(radius, m - 1 - np.arange(N)) * factorial[:N] / factorial[m-1] / 10000
         Kn_Kref = np.array(self.bn) * factor
         Ks_Kref = np.array(self.an) * factor
 
@@ -81,6 +81,19 @@ class MultipolarImperfectionTable(BaseModel, extra="forbid"):
             Ks_Kref /= factorial[:N] / factorial[m-1]
 
         return Kn_Kref, Ks_Kref
+
+    def get_Kn_Ks(self, Kn_in: np.ndarray, Ks_in: np.ndarray,
+                  convention: Literal["xsuite", "at"] = "xsuite") -> Tuple[np.ndarray, np.ndarray]:
+        Kn_Kref, Ks_Kref = self.get_Kn_Ks_over_Kref(convention=convention)
+        if self.reference_component == "B":
+            Kref = Kn_in[self.reference_order - 1]
+        elif self.reference_component == "A":
+            Kref = Ks_in[self.reference_order - 1]
+        else:
+            raise ValueError(f"Unknown reference component: {self.reference_component}.")
+        Kn = Kn_Kref * Kref
+        Ks = Ks_Kref * Kref
+        return Kn, Ks
 
 class ImperfectionsModel(BaseModel, extra="forbid"):
     list_of_tables: Annotated[list[MultipolarImperfectionTable], Field(min_length=1)]
@@ -99,15 +112,9 @@ class ImperfectionsModel(BaseModel, extra="forbid"):
         Kn_out[:len(Kn_in)] += Kn_in
         Ks_out[:len(Ks_in)] += Ks_in
         for table in self.list_of_tables:
-            Kn_Kref, Ks_Kref = table.get_Kn_Ks_over_Kref(convention=convention)
-            if table.reference_component == "B":
-                Kref = Kn_in[table.reference_order - 1]
-            elif table.reference_component == "A":
-                Kref = Ks_in[table.reference_order - 1]
-            else:
-                raise ValueError(f"Unknown reference component: {table.reference_component}.")
-            Kn_out[:len(Kn_Kref)] += Kn_Kref * Kref
-            Ks_out[:len(Kn_Kref)] += Ks_Kref * Kref
+            Kn_temp, Ks_temp = table.get_Kn_Ks(Kn_in=Kn_in, Ks_in=Ks_in, convention=convention)
+            Kn_out[:len(Kn_temp)] += Kn_temp
+            Ks_out[:len(Ks_temp)] += Ks_temp
         return list(Kn_out), list(Ks_out)
 
 class MultipolarImperfectionTableFactory(BaseModel, extra="forbid"):
