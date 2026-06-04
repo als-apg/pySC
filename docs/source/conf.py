@@ -18,8 +18,8 @@ sys.path.insert(0, str(ROOT))
 import pySC
 
 project = "pySC"
-author = "Konstantinos Paraschou"
-copyright = f"{datetime.now().year}, {author}"
+author = "pySC contributors"
+copyright = f"{datetime.now().year}, DESY"
 release = pySC.__version__
 version = ".".join(release.split(".")[:2])
 
