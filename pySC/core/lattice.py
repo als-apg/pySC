@@ -374,6 +374,8 @@ class ATLattice(Lattice):
                 elem.PolynomB[order] = value
             else:
                 raise Exception('ERROR: Not supposed to happen!')
+            if hasattr(elem, 'MaxOrder') and order > elem.MaxOrder:
+                elem.MaxOrder = order
         return
 
     def get_cavity_voltage_phase_frequency(self, index: int, use_design=True):

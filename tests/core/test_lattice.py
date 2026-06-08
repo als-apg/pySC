@@ -190,6 +190,23 @@ def test_corrector_kickangle_convention(hmba_lattice_file):
     assert readback == pytest.approx(test_val)
 
 
+def test_set_magnet_component_updates_maxorder(sc):
+    """Setting a higher-order component updates the AT element's MaxOrder."""
+    ring = sc.lattice.design
+    quad_idx = next(i for i, e in enumerate(ring) if isinstance(e, at.Quadrupole))
+    elem = ring[quad_idx]
+    assert elem.MaxOrder == 1
+
+    elem.PolynomB = np.pad(elem.PolynomB, (0, 4))
+    elem.PolynomA = np.pad(elem.PolynomA, (0, 4))
+
+    sc.lattice.set_magnet_component(quad_idx, 0.001, 'B', order=5, use_design=True)
+    assert elem.MaxOrder == 5
+
+    sc.lattice.set_magnet_component(quad_idx, 0.0002, 'A', order=3, use_design=True)
+    assert elem.MaxOrder == 5
+
+
 # ---------------------------------------------------------------------------
 # RF cavity
 # ---------------------------------------------------------------------------

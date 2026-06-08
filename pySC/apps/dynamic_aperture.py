@@ -10,14 +10,17 @@ def dynamic_aperture(
     initial_radius=1e-3, max_radius=0.05,
     center_on_orbit=True, use_design=False,
 ) -> dict:
-    """Calculate the dynamic aperture by binary search at each angle."""
-    angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=False)
+    """Calculate the dynamic aperture by binary search at each angle.
 
-    if center_on_orbit:
-        orbit = SC.lattice.get_orbit(use_design=use_design)
-        x0, y0 = orbit[0, 0], orbit[1, 0]
-    else:
-        x0, y0 = 0.0, 0.0
+    Matches MATLAB SCdynamicAperture: scan at uniform angles from the origin,
+    then recenter the DA polygon on the closed orbit (cart2pol after orbit
+    subtraction).  Uses endpoint=True so that linspace(0, 2π, N) produces
+    the same grid as MATLAB's linspace.
+    """
+    angles = np.linspace(0, 2 * np.pi, n_angles, endpoint=True)
+
+    # Always scan from the origin (MATLAB default: launchOnOrbit=0)
+    x0, y0 = 0.0, 0.0
 
     radii = np.zeros(n_angles)
 
@@ -51,6 +54,17 @@ def dynamic_aperture(
 
     x = radii * np.cos(angles)
     y = radii * np.sin(angles)
+
+    # Recenter on closed orbit (matches MATLAB SCdynamicAperture lines 167-181)
+    if center_on_orbit:
+        orbit = SC.lattice.get_orbit(use_design=use_design)
+        xco, yco = orbit[0, 0], orbit[1, 0]
+        if not (np.isnan(xco) or np.isnan(yco)):
+            x = x - xco
+            y = y - yco
+            radii = np.sqrt(x**2 + y**2)
+            angles = np.arctan2(y, x)
+
     area = _shoelace_area(x, y)
 
     return {"radii": radii, "angles": angles, "area": area, "x": x, "y": y}
