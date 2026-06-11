@@ -126,6 +126,54 @@ def test_configure_magnets_dipole_convention(hmba_lattice_file):
 
 
 @pytest.mark.slow
+@pytest.mark.parametrize("component", ["B2", "B2L"])
+def test_configure_shifted_quadrupole_feed_down(hmba_lattice_file, component):
+    lattice = ATLattice(lattice_file=hmba_lattice_file, naming="FamName")
+    dip_name = "DQ1B"
+    dip_index = 50
+    initial_angle = lattice.get_bending_angle(dip_index)
+    initial_b0 = lattice.get_magnet_component(dip_index, "B", 0)
+    initial_k1 = lattice.get_magnet_component(dip_index, "B", 1)
+    length = lattice.get_length(dip_index)
+    design_shift = (initial_angle / length + initial_b0) / initial_k1
+
+    config = {
+        "error_table": {"quad_cal": "0"},
+        "magnets": {
+            "shifted_quadrupole": {
+                "regex": f"^{dip_name}$",
+                "components": [{component: "quad_cal"}],
+                "shifted": True,
+            },
+        },
+    }
+    SC = SimulatedCommissioning(lattice=lattice, configuration=config, seed=42)
+    configure_magnets(SC)
+
+    control_name = f"{dip_name}/{component}"
+    feed_down_link = SC.magnet_settings.links[f"{control_name}->{dip_name}/B1"]
+    assert feed_down_link.is_integrated is False
+    assert SC.lattice.get_bending_angle(dip_index) == pytest.approx(initial_angle)
+    assert SC.lattice.get_magnet_component(
+        dip_index, "B", 0, use_design=False
+    ) == pytest.approx(initial_b0)
+
+    delta_k1 = 0.2
+    setpoint = initial_k1 + delta_k1
+    if component == "B2L":
+        setpoint *= length
+    SC.magnet_settings.set(control_name, setpoint)
+
+    assert SC.lattice.get_bending_angle(dip_index) == pytest.approx(initial_angle)
+    assert SC.lattice.get_magnet_component(
+        dip_index, "B", 1, use_design=False
+    ) == pytest.approx(initial_k1 + delta_k1)
+    assert SC.lattice.get_magnet_component(
+        dip_index, "B", 0, use_design=False
+    ) == pytest.approx(initial_b0 + design_shift * delta_k1)
+
+
+@pytest.mark.slow
 def test_configure_magnets_limits(hmba_lattice_file):
     """Controls have limits when configured."""
     SC = _make_sc_with_magnet_config(hmba_lattice_file)

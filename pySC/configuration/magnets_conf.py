@@ -1,8 +1,8 @@
 from typing import Any
-import math
 from ..core.simulated_commissioning import SimulatedCommissioning
 from ..core.lattice import ATLattice
-from ..core.magnet import MAGNET_NAME_TYPE
+from ..core.control import LinearConv
+from ..core.magnet import ControlMagnetLink, MAGNET_NAME_TYPE
 from .general import get_error, get_indices_and_names
 from .supports_conf import generate_element_misalignments
 
@@ -20,20 +20,12 @@ def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magn
     # we need to copy because we remove elements later to check for undeclared components to invert
 
     is_shifted = magnet_category_conf.get('shifted', False)
-    bending_angle = SC.lattice.get_bending_angle(index)
-    bending_length = SC.lattice.get_length(index)
-    magnet_length = bending_length
-    design_shift = 0.0
-    design_k1 = 0.0
-    if is_shifted:
-        element = SC.lattice.design[index]
-        component_value = getattr(element, 'PolynomB')[1]
-        if not SC.lattice.is_dipole(index):
-            raise ValueError(f"magnets/{magnet_category_name}: shifted=true requires an sbend with non-zero quad component at index {index} ({magnet_name}).")
-        radius = bending_length/bending_angle
-        magnet_length = 2*abs(radius)*abs(math.sin(bending_angle/2))
-        design_shift = bending_angle/(component_value*bending_length)
-        design_k1 = component_value
+    magnet_length = SC.lattice.get_length(index)
+    if is_shifted and not SC.lattice.is_dipole(index):
+        raise ValueError(
+            f"magnets/{magnet_category_name}: shifted=true expects a dipole "
+            f"at index {index} ({magnet_name})."
+        )
 
     if 'components' in magnet_category_conf:
         components = []
@@ -48,10 +40,6 @@ def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magn
             controlled_components=components,
             magnet_name=magnet_name, 
             magnet_length=magnet_length,
-            is_shifted=is_shifted,
-            bending_length=bending_length,
-            design_shift=design_shift,
-            design_k1=design_k1,
             to_design=to_design
         )
 
@@ -92,6 +80,40 @@ def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magn
             magnet_settings.controls[control_name].setpoint = setpoint
             magnet_settings.links[link_name].error.factor = factor
             magnet_settings.links[link_name].error.offset = offset
+
+        if is_shifted:
+            quad_components = [component for component in components if component in ('B2', 'B2L')]
+            if len(quad_components) != 1:
+                raise ValueError(f"magnets/{magnet_category_name}: shifted=true requires B2 or B2L in control")
+
+            component = quad_components[0]
+            control_name = f'{magnet_name}/{component}'
+            source_link = magnet_settings.links[f'{control_name}->{control_name}']
+            k1 = SC.lattice.get_magnet_component(index, component_type='B', order=1)
+            if k1 == 0:
+                raise ValueError(f"magnets/{magnet_category_name}: shifted=true requires a non-zero quadrupole component at index {index} ({magnet_name}).")
+
+            k0 = SC.lattice.get_magnet_component(index, component_type='B', order=0)
+            reference_k0 = 0.0
+            if type(SC.lattice) is ATLattice:
+                reference_k0 = SC.lattice.get_bending_angle(index) / magnet_length
+                k0 += reference_k0
+            design_shift = k0 / k1
+
+            scale = magnet_length if source_link.is_integrated else 1.0
+            factor = design_shift * source_link.error.factor / scale
+            offset = design_shift * source_link.error.offset / scale - reference_k0
+            target_name = f'{magnet_name}/B1'
+            magnet_settings.add_link(ControlMagnetLink(
+                link_name=f'{control_name}->{target_name}',
+                magnet_name=magnet_name,
+                control_name=control_name,
+                component='B',
+                order=1,
+                error=LinearConv(factor=factor, offset=offset),
+                is_integrated=False,
+            ))
+            magnet_settings.magnets[magnet_name].offset_B[0] = 0.0
 
     assert len(components_to_invert) == 0, f"Found undeclared components in components to invert: magnets/{magnet_category_name}/invert: {components_to_invert}."
 
