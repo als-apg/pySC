@@ -1,10 +1,14 @@
 from typing import Any
+import logging
 from ..core.simulated_commissioning import SimulatedCommissioning
 from ..core.lattice import ATLattice
 from ..core.control import LinearConv
 from ..core.magnet import ControlMagnetLink, MAGNET_NAME_TYPE
+from ..core.multipolar_imperfections import ImperfectionsModelFactory
 from .general import get_error, get_indices_and_names
 from .supports_conf import generate_element_misalignments
+
+logger = logging.getLogger(__name__)
 
 def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magnet_name: MAGNET_NAME_TYPE,
                                     magnet_category_conf: dict[str, Any], magnet_category_name: str, to_design: bool = False) -> list[str]:
@@ -132,10 +136,15 @@ def generate_default_magnet_control(SC: SimulatedCommissioning, index: int, magn
 
     return new_control_list
 
-
 def configure_magnets(SC: SimulatedCommissioning):
     # get magnets configuration, return empty dict if not there
     magnet_conf = dict.get(SC.configuration, 'magnets', {})
+
+    if 'multipolar_imperfection_models' in SC.configuration:
+        multipolar_imperfection_models = dict.get(SC.configuration, 'multipolar_imperfection_models')
+        imperfection_model_factories: dict[str, ImperfectionsModelFactory] = {}
+        for model_name, model_object in multipolar_imperfection_models.items():
+            imperfection_model_factories[model_name] = ImperfectionsModelFactory.model_validate({'factories': model_object})
 
     for magnet_category_name in magnet_conf.keys():
         magnet_category_conf = magnet_conf[magnet_category_name]
@@ -154,6 +163,22 @@ def configure_magnets(SC: SimulatedCommissioning):
             control_list = control_list + new_controls
         SC.magnet_arrays[magnet_category_name] = magnet_list
         SC.control_arrays[magnet_category_name] = control_list
+
+        if 'imperfections' in magnet_category_conf:
+            if 'multipolar_imperfection_models' not in SC.configuration:
+                raise Exception("'multipolar_imperfection_models' not found in configuration.")
+
+            imperfections_model_name = magnet_category_conf['imperfections']
+            for magnet_name in magnet_names:
+                if SC.magnet_settings.magnets[magnet_name].imperfections is not None:
+                    raise Exception(f"Magnet {magnet_name} of {magnet_category_name} already has an imperfections model.")
+                if imperfections_model_name not in imperfection_model_factories:
+                    raise ValueError(f"{imperfections_model_name} not found in the multipolar imperfection models.")
+                factory = imperfection_model_factories[imperfections_model_name]
+                SC.magnet_settings.magnets[magnet_name].imperfections = factory.create(SC.rng)
+
+                required_max_order = SC.magnet_settings.magnets[magnet_name].imperfections.max_order
+                SC.magnet_settings.magnets[magnet_name].ensure_max_order(required_max_order=required_max_order)
 
     SC.magnet_settings.connect_links()
     SC.magnet_settings.sendall()

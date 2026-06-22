@@ -1,5 +1,5 @@
 from pydantic import BaseModel, PrivateAttr
-from typing import Optional, Union, TYPE_CHECKING
+from typing import Optional, Union, Any, TYPE_CHECKING
 from ..apps.response_matrix import ResponseMatrix
 from .response_measurements import measure_TrajectoryResponseMatrix, measure_OrbitResponseMatrix, measure_RFFrequencyOrbitResponse
 from .trajectory_bba import Trajectory_BBA_Configuration, trajectory_bba, get_mag_s_pos
@@ -163,7 +163,7 @@ class Tuning(BaseModel, extra="forbid"):
 
         return
 
-    def correct_injection(self, n_turns=1, n_reps=1, method='tikhonov', parameter=100, gain=1, correct_to_first_turn=False, virtual=False):
+    def correct_injection(self, n_turns=1, n_reps=1, method='tikhonov', parameter=100, gain=1,correct_to_first_turn=False, virtual=False, solver: Optional[Any] = None, plane=None):
         RM_name = f'trajectory{n_turns}'
         self.fetch_response_matrix(RM_name, orbit=False, n_turns=n_turns)
         response_matrix = self.response_matrix[RM_name]
@@ -173,8 +173,16 @@ class Tuning(BaseModel, extra="forbid"):
         interface = pySCInjectionInterface(SC=SC, n_turns=n_turns)
 
         for _ in range(n_reps):
-            _ = orbit_correction(interface=interface, response_matrix=response_matrix, reference=None,
-                                     method=method, parameter=parameter, gain=gain, virtual=virtual, apply=True)
+            _ = orbit_correction(interface=interface, 
+                                 response_matrix=response_matrix, 
+                                 reference=None, 
+                                 method=method, 
+                                 parameter=parameter, 
+                                 gain=gain,
+                                 virtual=virtual, 
+                                 solver=solver, 
+                                 apply=True,
+                                 plane=plane)
 
         trajectory_x, trajectory_y = SC.bpm_system.capture_injection(n_turns=n_turns)
         trajectory_x = trajectory_x.flatten('F')
@@ -187,7 +195,7 @@ class Tuning(BaseModel, extra="forbid"):
 
         return
 
-    def correct_orbit(self, n_reps=1, method='tikhonov', parameter=100, gain=1, virtual=False):
+    def correct_orbit(self, n_reps=1, method='tikhonov', parameter=100, gain=1, virtual=False, solver: Optional[Any] = None, plane=None):
         RM_name = 'orbit'
         self.fetch_response_matrix(RM_name, orbit=True)
         response_matrix = self.response_matrix[RM_name]
@@ -197,8 +205,15 @@ class Tuning(BaseModel, extra="forbid"):
         interface = pySCOrbitInterface(SC=SC)
 
         for _ in range(n_reps):
-            _ = orbit_correction(interface=interface, response_matrix=response_matrix, reference=None,
-                                     method=method, parameter=parameter, virtual=virtual, gain=gain, apply=True)
+            _ = orbit_correction(interface=interface,
+                                 response_matrix=response_matrix,
+                                 reference=None,
+                                 method=method, parameter=parameter,
+                                 virtual=virtual,
+                                 gain=gain,
+                                 solver=solver,
+                                 apply=True,
+                                 plane=plane)
 
         orbit_x, orbit_y = SC.bpm_system.capture_orbit()
         rms_x = np.nanstd(orbit_x) * 1e6
@@ -245,34 +260,64 @@ class Tuning(BaseModel, extra="forbid"):
 
         return np.dot(xy, response) / np.dot(response, response)
 
-    def set_multipole_scale(self, scale: float = 1):
-        logger.info(f'Setting "multipoles" to {scale*100:.0f}%')
-        for control_name in self.multipoles:
-            setpoint = self._parent.design_magnet_settings.get(control_name)
-            self._parent.magnet_settings.set(control_name, scale*setpoint)
+    def set_multipole_scale(self, scale: float = 1, group: Optional[str] = None):
+        SC = self._parent
+        if group is None:
+            multipoles = self.multipoles
+            logger.info(f'Setting "multipoles" to {scale*100:.0f}%')
+        else:
+            assert group in SC.control_arrays, f"{group} not found in control_arrays."
+            multipoles = []
+            for multipole in self.multipoles:
+                if multipole in SC.control_arrays[group]:
+                    multipoles.append(multipole)
+            if len(multipoles) == 0:
+                logger.warning(f'No common multipoles were found between tuning.multipoles and control_arrays["{group}"]')
+            logger.info(f'Setting "{group} multipoles" to {scale*100:.0f}%')
+
+        for control_name in multipoles:
+            setpoint = SC.design_magnet_settings.get(control_name)
+            SC.magnet_settings.set(control_name, scale*setpoint)
 
     def reset_to_design(self):
         for control_name in self._parent.magnet_settings.controls.keys():
             setpoint = self._parent.design_magnet_settings.get(control_name)
             self._parent.magnet_settings.set(control_name, setpoint)
 
-    def generate_trajectory_bba_config(self, max_dx_at_bpm: float = 1e-3, 
+    def generate_trajectory_bba_config(self, max_dx_at_bpm: float = 1e-3,
                                        max_modulation: float = 0.2e-3,
-                                       n_downstream_bpms: int = 50, 
-                                       max_ncorr_index: int = 10) -> None:
+                                       n_downstream_bpms: int = 50,
+                                       max_ncorr_index: int = 10,
+                                       max_modulation_sextupole: Optional[float] = None,
+                                       max_dx_at_bpm_sextupole: Optional[float] = None,
+                                       ignore_sextupoles: bool = False,
+                                      ) -> None:
         config = Trajectory_BBA_Configuration.generate_config(SC=self._parent,
                                                               max_dx_at_bpm=max_dx_at_bpm,
                                                               max_modulation=max_modulation,
                                                               n_downstream_bpms=n_downstream_bpms,
-                                                              max_ncorr_index=max_ncorr_index)
+                                                              max_ncorr_index=max_ncorr_index,
+                                                              max_dx_at_bpm_sextupole=max_dx_at_bpm_sextupole,
+                                                              max_modulation_sextupole=max_modulation_sextupole,
+                                                              ignore_sextupoles=ignore_sextupoles,
+                                                              )
         self.trajectory_bba_config = config
         return
 
-    def generate_orbit_bba_config(self, max_dx_at_bpm: float = 0.3e-3, 
-                                       max_modulation: float = 20e-6) -> None:
+    def generate_orbit_bba_config(self,
+                                  max_dx_at_bpm: float = 0.3e-3,
+                                  max_modulation: float = 20e-6,
+                                  max_dx_at_bpm_sextupole: Optional[float] = None,
+                                  max_modulation_sextupole: Optional[float] = None,
+                                  ignore_sextupoles: bool = False,
+                                 ) -> None:
         config = Orbit_BBA_Configuration.generate_config(SC=self._parent,
                                                          max_dx_at_bpm=max_dx_at_bpm,
-                                                         max_modulation=max_modulation)
+                                                         max_modulation=max_modulation,
+                                                         max_dx_at_bpm_sextupole=max_dx_at_bpm_sextupole,
+                                                         max_modulation_sextupole=max_modulation_sextupole,
+                                                         ignore_sextupoles=ignore_sextupoles,
+                                                        )
         self.orbit_bba_config = config
         return
 
@@ -752,7 +797,6 @@ class Tuning(BaseModel, extra="forbid"):
             SC.lattice.omp_num_threads = previous_threads
 
         return transmission
-
     def correct_orbit_with_dispersion(self, alpha_sequence=None,
                                       n_reps=1, method='tikhonov', gain=1.0, virtual=False):
         SC = self._parent

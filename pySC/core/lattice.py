@@ -217,10 +217,11 @@ class ATLattice(Lattice):
         else:
             orbit0, _ = at.find_orbit(ring, refpts=indices)
 
-        _, ringdata, elemdata = at.get_optics(ring, refpts=indices, get_chrom=True, orbit=orbit0)
+        _, ringdata, elemdata = at.get_optics(ring, refpts=indices, get_chrom=True, get_w=True, orbit=orbit0)
 
         qs = ringdata['tune'][2] if not self.no_6d else 0 # doesn't exist when ring has 6d disabled
 
+        twopi = 2*np.pi
         twiss = {'qx': elemdata.mu[-1,0]/2/np.pi,
                  'qy': elemdata.mu[-1,1]/2/np.pi,
                  'qs': qs,
@@ -237,12 +238,21 @@ class ATLattice(Lattice):
                  'bety': elemdata.beta[:, 1],
                  'alfx': elemdata.alpha[:, 0],
                  'alfy': elemdata.alpha[:, 1],
-                 'mux': elemdata.mu[:, 0]/2./np.pi,
-                 'muy': elemdata.mu[:, 1]/2./np.pi,
+                 'mux': elemdata.mu[:, 0] / twopi,
+                 'muy': elemdata.mu[:, 1] / twopi,
                  'dx' : elemdata.dispersion[:, 0],
                  'dpx': elemdata.dispersion[:, 1],
                  'dy' : elemdata.dispersion[:, 2],
                  'dpy': elemdata.dispersion[:, 3],
+                 'wx_chrom': elemdata.W[:, 0],
+                 'bx_chrom': elemdata.dbeta[:, 0]/elemdata.beta[:, 0],
+                 'ax_chrom': elemdata.dalpha[:, 0] - (elemdata.alpha[:, 0] / elemdata.beta[:, 0]) * elemdata.dbeta[:, 0],
+                 'wy_chrom': elemdata.W[:, 1],
+                 'by_chrom': elemdata.dbeta[:, 1]/elemdata.beta[:, 1],
+                 'ay_chrom': elemdata.dalpha[:, 1] - (elemdata.alpha[:, 1] / elemdata.beta[:, 1]) * elemdata.dbeta[:, 1],
+                 'dmux': elemdata.dmu[:, 0] / twopi,
+                 'dmuy': elemdata.dmu[:, 1] / twopi,
+                 'ddx': elemdata.ddispersion[:, 0],
                 }
         return twiss
 
@@ -323,6 +333,43 @@ class ATLattice(Lattice):
             return self._design[index].Length
         else: # when length is zero
             return 1
+
+    def ensure_max_order(self, index: int, max_order: int, use_design=True) -> None:
+        """
+        Ensure an AT lattice element supports multipoles up to ``max_order``.
+
+        Parameters
+        ----------
+        index : int
+            Index of the lattice element to extend.
+        max_order : int
+            Maximum zero-based multipole order required by the caller.
+        use_design : bool, optional
+            If `True`, extend the design lattice element. If `False`, extend
+            the active ring element.
+
+        Raises
+        ------
+        Exception
+            If the element is an AT Corrector and ``max_order`` is larger than
+            zero.
+        """
+        if use_design:
+            elem = self._design[index]
+        else:
+            elem = self._ring[index]
+
+        if type(elem) is at.Corrector:
+            if max_order > 0:
+                raise Exception('ERROR: max_order cannot be extended for at.Corrector.')
+
+        for component_type in ['A', 'B']:
+            attribute = f'Polynom{component_type}'
+            polynomial = getattr(elem, attribute)
+            if len(polynomial) <= max_order:
+                extended = np.zeros(max_order + 1, dtype=np.asarray(polynomial).dtype)
+                extended[:len(polynomial)] = polynomial
+                setattr(elem, attribute, extended)
 
     def get_magnet_component(self, index: int, component_type: Literal['A', 'B'],
                              order: int, use_design=True) -> float:
@@ -432,3 +479,20 @@ class ATLattice(Lattice):
             elem = self._ring[index]
 
         update_transformation(elem, dx=dx, dy=dy, dz=dz, roll=roll, yaw=yaw, pitch=pitch)
+
+    def get_Brho(self, use_design: bool = False) -> float:
+        """
+        Return the magnetic rigidity of the reference particle.
+
+        Parameters
+        ----------
+        use_design : bool, optional
+            If True, use the design lattice. Otherwise, use the active lattice.
+
+        Returns
+        -------
+        float
+            Magnetic rigidity in T m.
+        """
+        ring = self._design if use_design else self._ring
+        return ring.BRho

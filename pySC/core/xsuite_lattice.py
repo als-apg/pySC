@@ -244,6 +244,15 @@ class XSuiteLattice(Lattice):
                  'dpx': tw.dpx,
                  'dy' : tw.dy,
                  'dpy': tw.dpy,
+                 'wx_chrom': tw.wx_chrom,
+                 'bx_chrom': tw.bx_chrom,
+                 'ax_chrom': tw.ax_chrom,
+                 'wy_chrom': tw.wy_chrom,
+                 'by_chrom': tw.by_chrom,
+                 'ay_chrom': tw.ay_chrom,
+                 'dmux': tw.dmux,
+                 'dmuy': tw.dmuy,
+                 'ddx': tw.ddx,
                 }
         return twiss 
 
@@ -317,6 +326,28 @@ class XSuiteLattice(Lattice):
             return elem.length
         else: # when length is zero
             return 1
+
+    def ensure_max_order(self, index: int, max_order: int, use_design=True) -> None:
+        """
+        Ensure an XSuite lattice element supports multipoles up to ``max_order``.
+
+        Parameters
+        ----------
+        index : int
+            Index of the lattice element. Unused for XSuite.
+        max_order : int
+            Maximum zero-based multipole order required by the caller. Unused
+            for XSuite.
+        use_design : bool, optional
+            Selects the design lattice when `True` and the active ring when
+            `False`. Unused for XSuite.
+
+        Notes
+        -----
+        This is a no-op because XSuite component setters extend ``knl`` and
+        ``ksl`` arrays when needed.
+        """
+        pass
 
     def get_magnet_component(self, index: int, component_type: Literal['A', 'B'],
                              order: int, use_design=True) -> float:
@@ -560,3 +591,23 @@ class XSuiteLattice(Lattice):
 
     def get_name_from_index(self, index: int):
         return self.design.element_names[index]
+
+    def get_Brho(self, use_design: bool = False) -> float:
+        """
+        Return the magnetic rigidity of the reference particle.
+    
+        Parameters
+        ----------
+        use_design : bool, optional
+            If True, use the design lattice. Otherwise, use the active lattice.
+    
+        Returns
+        -------
+        float
+            Magnetic rigidity in T m.
+        """
+        line = self._design if use_design else self._ring
+        if line.particle_ref is None:
+            raise ValueError("Xsuite lattice has no particle_ref. Cannot compute Brho.")
+    
+        return float(line.particle_ref.p0c[0]) / clight

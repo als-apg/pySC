@@ -1,8 +1,9 @@
 """Tests for pySC.tuning.tuning_core: Tuning class helpers and integration."""
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
+from pySC.apps.response_matrix import ResponseMatrix
 from pySC.tuning.tuning_core import Tuning
 
 # ---------------------------------------------------------------------------
@@ -40,6 +41,236 @@ def test_bad_outputs_from_bad_bpms_indices(sc_tuning):
         1 + n_bpms + n_turns * n_bpms,  # V, turn 1
     ]
     assert result == expected
+
+
+def _make_plane_response_matrix():
+    """Create a small H/V response matrix for tuning pass-through tests."""
+    return ResponseMatrix(
+        matrix=np.eye(4),
+        input_names=["hcor1", "hcor2", "vcor1", "vcor2"],
+        output_names=["bpm1", "bpm2", "bpm1", "bpm2"],
+        input_planes=["H", "H", "V", "V"],
+        output_planes=["H", "H", "V", "V"],
+    )
+
+
+def _make_mock_tuning():
+    """Create a Tuning instance with only the SC state correction needs."""
+    tuning = Tuning(HCORR=["hcor1", "hcor2"], VCORR=["vcor1", "vcor2"])
+    SC = MagicMock()
+    SC.bpm_system.indices = [0, 1]
+    SC.bpm_system.capture_orbit.return_value = (np.zeros(2), np.zeros(2))
+    SC.bpm_system.capture_injection.return_value = (np.zeros((2, 1)), np.zeros((2, 1)))
+    tuning._parent = SC
+    return tuning
+
+
+def test_correct_orbit_passes_plane_to_orbit_correction():
+    """correct_orbit forwards the requested plane to orbit_correction."""
+    tuning = _make_mock_tuning()
+    tuning.response_matrix["orbit"] = _make_plane_response_matrix()
+    interface = MagicMock()
+    solver = MagicMock()
+
+    with (
+        patch("pySC.tuning.tuning_core.pySCOrbitInterface", return_value=interface),
+        patch("pySC.tuning.tuning_core.orbit_correction", return_value={}) as mock_correction,
+    ):
+        tuning.correct_orbit(
+            n_reps=1,
+            method="svd_cutoff",
+            parameter=0,
+            gain=0.7,
+            virtual=True,
+            solver=solver,
+            plane="H",
+        )
+
+    _, kwargs = mock_correction.call_args
+    assert kwargs["interface"] is interface
+    assert kwargs["response_matrix"] is tuning.response_matrix["orbit"]
+    assert kwargs["method"] == "svd_cutoff"
+    assert kwargs["parameter"] == 0
+    assert kwargs["gain"] == 0.7
+    assert kwargs["virtual"] is True
+    assert kwargs["solver"] is solver
+    assert kwargs["apply"] is True
+    assert kwargs["plane"] == "H"
+
+
+def test_correct_injection_passes_plane_to_orbit_correction():
+    """correct_injection forwards the requested plane to orbit_correction."""
+    tuning = _make_mock_tuning()
+    tuning.response_matrix["trajectory1"] = _make_plane_response_matrix()
+    interface = MagicMock()
+    solver = MagicMock()
+
+    with (
+        patch("pySC.tuning.tuning_core.pySCInjectionInterface", return_value=interface),
+        patch("pySC.tuning.tuning_core.orbit_correction", return_value={}) as mock_correction,
+    ):
+        tuning.correct_injection(
+            n_turns=1,
+            n_reps=1,
+            method="tikhonov",
+            parameter=3,
+            gain=0.4,
+            virtual=True,
+            solver=solver,
+            plane="V",
+        )
+
+    _, kwargs = mock_correction.call_args
+    assert kwargs["interface"] is interface
+    assert kwargs["response_matrix"] is tuning.response_matrix["trajectory1"]
+    assert kwargs["method"] == "tikhonov"
+    assert kwargs["parameter"] == 3
+    assert kwargs["gain"] == 0.4
+    assert kwargs["virtual"] is True
+    assert kwargs["solver"] is solver
+    assert kwargs["apply"] is True
+    assert kwargs["plane"] == "V"
+
+
+def _make_multipole_tuning():
+    """Create a Tuning instance with mocked magnet/design settings."""
+    tuning = Tuning(multipoles=["sf1/B3", "sf2/B3", "sd1/B3"])
+    SC = MagicMock()
+    SC.control_arrays = {
+        "focusing": ["sf1/B3", "sf2/B3", "qf1/B2"],
+        "quadrupoles": ["qf1/B2", "qd1/B2"],
+    }
+    design_setpoints = {
+        "sf1/B3": 1.0,
+        "sf2/B3": 2.0,
+        "sd1/B3": -3.0,
+    }
+    SC.design_magnet_settings.get.side_effect = design_setpoints.__getitem__
+    tuning._parent = SC
+    return tuning, SC
+
+
+def test_set_multipole_scale_scales_all_configured_multipoles():
+    """Without a group, all tuning multipoles are scaled to design."""
+    tuning, SC = _make_multipole_tuning()
+
+    tuning.set_multipole_scale(scale=0.5)
+
+    SC.design_magnet_settings.get.assert_has_calls([
+        call("sf1/B3"),
+        call("sf2/B3"),
+        call("sd1/B3"),
+    ])
+    SC.magnet_settings.set.assert_has_calls([
+        call("sf1/B3", 0.5),
+        call("sf2/B3", 1.0),
+        call("sd1/B3", -1.5),
+    ])
+
+
+def test_set_multipole_scale_filters_by_control_array_group():
+    """With a group, only controls present in both lists are scaled."""
+    tuning, SC = _make_multipole_tuning()
+
+    tuning.set_multipole_scale(scale=2.0, group="focusing")
+
+    SC.design_magnet_settings.get.assert_has_calls([
+        call("sf1/B3"),
+        call("sf2/B3"),
+    ])
+    SC.magnet_settings.set.assert_has_calls([
+        call("sf1/B3", 2.0),
+        call("sf2/B3", 4.0),
+    ])
+    assert SC.design_magnet_settings.get.call_count == 2
+    assert SC.magnet_settings.set.call_count == 2
+
+
+def test_set_multipole_scale_rejects_unknown_group():
+    """A group name must exist in SC.control_arrays."""
+    tuning, SC = _make_multipole_tuning()
+
+    with pytest.raises(AssertionError, match="sextupoles not found in control_arrays"):
+        tuning.set_multipole_scale(group="sextupoles")
+
+    SC.design_magnet_settings.get.assert_not_called()
+    SC.magnet_settings.set.assert_not_called()
+
+
+def test_set_multipole_scale_warns_and_skips_empty_overlap(caplog):
+    """A valid group with no tuning multipoles logs a warning and changes nothing."""
+    tuning, SC = _make_multipole_tuning()
+
+    with caplog.at_level("WARNING", logger="pySC.tuning.tuning_core"):
+        tuning.set_multipole_scale(group="quadrupoles")
+
+    assert 'No common multipoles were found between tuning.multipoles and control_arrays["quadrupoles"]' in caplog.text
+    SC.design_magnet_settings.get.assert_not_called()
+    SC.magnet_settings.set.assert_not_called()
+
+
+def test_generate_trajectory_bba_config_forwards_sextupole_options():
+    """Tuning wrapper forwards trajectory sextupole BBA options."""
+    tuning = Tuning()
+    SC = MagicMock()
+    tuning._parent = SC
+    config = MagicMock()
+
+    with patch(
+        "pySC.tuning.tuning_core.Trajectory_BBA_Configuration.generate_config",
+        return_value=config,
+    ) as generate_config:
+        tuning.generate_trajectory_bba_config(
+            max_dx_at_bpm=1e-3,
+            max_modulation=2e-4,
+            n_downstream_bpms=7,
+            max_ncorr_index=3,
+            max_dx_at_bpm_sextupole=2e-3,
+            max_modulation_sextupole=1e-4,
+            ignore_sextupoles=True,
+        )
+
+    generate_config.assert_called_once_with(
+        SC=SC,
+        max_dx_at_bpm=1e-3,
+        max_modulation=2e-4,
+        n_downstream_bpms=7,
+        max_ncorr_index=3,
+        max_dx_at_bpm_sextupole=2e-3,
+        max_modulation_sextupole=1e-4,
+        ignore_sextupoles=True,
+    )
+    assert tuning.trajectory_bba_config is config
+
+
+def test_generate_orbit_bba_config_forwards_sextupole_options():
+    """Tuning wrapper forwards orbit sextupole BBA options."""
+    tuning = Tuning()
+    SC = MagicMock()
+    tuning._parent = SC
+    config = MagicMock()
+
+    with patch(
+        "pySC.tuning.tuning_core.Orbit_BBA_Configuration.generate_config",
+        return_value=config,
+    ) as generate_config:
+        tuning.generate_orbit_bba_config(
+            max_dx_at_bpm=3e-4,
+            max_modulation=2e-5,
+            max_dx_at_bpm_sextupole=1e-3,
+            max_modulation_sextupole=1e-5,
+            ignore_sextupoles=True,
+        )
+
+    generate_config.assert_called_once_with(
+        SC=SC,
+        max_dx_at_bpm=3e-4,
+        max_modulation=2e-5,
+        max_dx_at_bpm_sextupole=1e-3,
+        max_modulation_sextupole=1e-5,
+        ignore_sextupoles=True,
+    )
+    assert tuning.orbit_bba_config is config
 
 
 # ---------------------------------------------------------------------------

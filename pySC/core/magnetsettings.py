@@ -4,7 +4,7 @@ from .magnet import Magnet, ControlMagnetLink, MAGNET_NAME_TYPE
 from .control import Control, LinearConv, IndivControl, KnobControl
 
 if TYPE_CHECKING:
-    from .new_simulated_commissioning import SimulatedCommissioning
+    from .simulated_commissioning import SimulatedCommissioning
 
 class MagnetSettings(BaseModel, extra="forbid"):
     magnets: Dict[MAGNET_NAME_TYPE, Magnet] = Field(default_factory=dict)
@@ -53,6 +53,11 @@ class MagnetSettings(BaseModel, extra="forbid"):
             raise ValueError(f"Magnet '{link.magnet_name}' not found")
         if link.control_name not in self.controls:
             raise ValueError(f"Control '{link.control_name}' not found")
+
+        required_max_order = link.order - 1
+
+        magnet = self.magnets[link.magnet_name]
+        magnet.ensure_max_order(required_max_order=required_max_order)
         self.links[link.link_name] = link
 
     def validate_one_component(self, component: str, magnet_name: Optional[MAGNET_NAME_TYPE] = None) -> tuple[str, int]:
