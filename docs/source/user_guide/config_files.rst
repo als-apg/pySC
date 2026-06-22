@@ -266,6 +266,13 @@ Supported magnet-family options are:
    model is instantiated separately for every magnet in the family and applied
    whenever the magnet settings are sent to the lattice.
 
+``shifted``
+   Optional boolean for shifted quadrupoles modeled as dipoles. Set to ``true``
+   when the selected lattice elements are dipoles whose dipole strength is
+   represented by feed-down from a horizontal offset. Each selected
+   element must be a dipole and must have a nonzero quadrupole component.
+   Defaults to ``false``.
+
 ``dx``, ``dy``, ``dz``, ``roll``, ``yaw``, ``pitch``
    Optional element misalignment entries. Each value must reference an
    ``error_table`` entry.
@@ -295,6 +302,19 @@ simulation convention. Every inverted component must also be listed under
          - A1: magnet_calibration
        invert:
          - B1
+
+Use ``shifted`` for dipole elements that model a horizontally shifted
+quadrupole. pySC keeps the dipole bending angle fixed and adds the required
+``B1`` feed-down link from the quadrupole control:
+
+.. code-block:: yaml
+
+   magnets:
+     shifted_quadrupoles:
+       regex: ^DQ
+       components:
+         - B2: magnet_calibration
+       shifted: true
 
 Attach a multipolar imperfection model by referencing the model name:
 
