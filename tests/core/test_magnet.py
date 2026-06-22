@@ -1,7 +1,6 @@
 """Tests for pySC.core.magnet: Magnet, ControlMagnetLink."""
 import pytest
-from unittest.mock import MagicMock, PropertyMock
-
+from unittest.mock import MagicMock
 from pySC.core.magnet import Magnet, ControlMagnetLink
 from pySC.core.control import Control, LinearConv
 
