@@ -41,6 +41,7 @@ def get_indices_and_names(SC: SimulatedCommissioning, category_name: str, catego
 
         indices = list(mapping.values())
         names = list(mapping.keys())
+        logger.info(f"Mapped {len(indices)} ({category_name}) from '{category_conf['mapping']}'")
     else:
         raise NotImplementedError("Only regex search and mapping is implemented.")
 
