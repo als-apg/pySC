@@ -4,6 +4,7 @@ import pytest
 import numpy as np
 
 from pySC.core.lattice import ATLattice
+from pySC.core.multipolar_imperfections import ImperfectionsModelFactory
 from pySC.core.simulated_commissioning import SimulatedCommissioning
 from pySC.core.rng import RNG
 
@@ -112,6 +113,39 @@ def test_sc_from_json_custom_lattice_file(sc, tmp_path, hmba_lattice_file):
     sc2 = SimulatedCommissioning.from_json(json_file, lattice_file=hmba_lattice_file)
     assert sc2.lattice.lattice_file == hmba_lattice_file
     assert len(sc2.lattice.ring) == len(sc.lattice.ring)
+
+
+@pytest.mark.regression
+def test_sc_from_json_reloads_lattice_with_extended_multipolar_errors(sc, tmp_path):
+    """from_json reloads a fresh lattice and restores extended magnet orders."""
+    magnet_name = next(iter(sc.magnet_settings.magnets))
+    magnet = sc.magnet_settings.magnets[magnet_name]
+
+    factory = ImperfectionsModelFactory.model_validate(
+        {
+            "factories": [
+                {
+                    "reference_radius": 0.0065,
+                    "reference_type": ["B", 2],
+                    "mean_bn": [0.0, 0.0, 0.0, 0.0, 0.0, 1.0],
+                    "mean_an": [0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                }
+            ]
+        }
+    )
+    magnet.imperfections = factory.create(sc.rng)
+    magnet.ensure_max_order(required_max_order=magnet.imperfections.max_order)
+
+    json_file = str(tmp_path / "sc.json")
+    sc.to_json(json_file)
+
+    reloaded = SimulatedCommissioning.from_json(json_file)
+    reloaded_magnet = reloaded.magnet_settings.magnets[magnet_name]
+    reloaded_element = reloaded.lattice.ring[reloaded_magnet.sim_index]
+
+    assert reloaded_magnet.max_order == magnet.imperfections.max_order
+    assert len(reloaded_element.PolynomA) >= reloaded_magnet.max_order + 1
+    assert len(reloaded_element.PolynomB) >= reloaded_magnet.max_order + 1
 
 
 # ---------------------------------------------------------------------------
