@@ -249,6 +249,7 @@ class MagnetSettings(BaseModel, extra="forbid"):
         Send all setpoints to the linked magnets.
         """
         for magnet in self.magnets.values():
+            magnet.ensure_max_order(magnet.max_order)
             magnet.update()
 
     def get_many(self, control_list: list[str], use_design: bool = False) -> dict[str, float]:
