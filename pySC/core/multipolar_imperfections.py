@@ -2,8 +2,10 @@ from __future__ import annotations
 from typing import Literal, Tuple, Optional, Annotated, Union
 from pydantic import BaseModel, model_validator, PositiveInt, PositiveFloat, NonNegativeInt, Field
 import numpy as np
+import logging
 
 from .rng import RNG
+logger = logging.getLogger(__name__)
 
 ## factorial[n] = n!
 factorial = np.array([
@@ -186,7 +188,7 @@ class MultipolarImperfectionCurve(BaseModel, extra="forbid"):
         source_value = abs(source_value)
 
         if source_value < self.source[0] or source_value > self.source[-1]:
-            raise ValueError('source_value is outside source array from the configuration!')
+            raise ValueError(f'MultipolarImperfectionCurve: source_value is outside source array from the configuration! {source_value=:.4f} not in [{self.source[0]}, {self.source[-1]}]')
 
         # interpolate to get target
         target_ab = np.interp(source_value, self.source, self.target)
@@ -375,9 +377,9 @@ class MultipolarImperfectionCurveFactory(BaseModel, extra="forbid"):
         if len(source) < 2:
             raise ValueError("source and target must contain at least two points.")
 
-        if not np.all(source > 0):
+        if not np.all(source >= 0):
             raise ValueError(
-                "source in MultipolarImperfectionCurve must be all positive."
+                "source in MultipolarImperfectionCurve must be all non-negative."
             )
 
         if not np.all(np.diff(source) > 0):
