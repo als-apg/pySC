@@ -20,6 +20,7 @@ from .control import KnobData
 logger = logging.getLogger(__name__)
 
 class SimulatedCommissioning(BaseModel, extra="forbid"):
+    version: Optional[str] = None
     lattice: ATLattice | XSuiteLattice
     magnet_settings: MagnetSettings = MagnetSettings()
     design_magnet_settings: MagnetSettings = MagnetSettings()

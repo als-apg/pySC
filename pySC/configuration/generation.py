@@ -1,6 +1,7 @@
 from typing import Optional
 import logging
 
+from ..version import __version__ as pySC_version
 from ..core.lattice import ATLattice
 from ..core.xsuite_lattice import XSuiteLattice, XSUITE_NOT_INSTALLED
 from ..core.simulated_commissioning import SimulatedCommissioning
@@ -70,6 +71,7 @@ def generate_SC(yaml_filepath: str, seed: int = 1, scale_errors: Optional[int] =
 
     # Create the SimulatedCommissioning instance
     SC = SimulatedCommissioning(lattice=lattice, configuration=config_dict, seed=seed)
+    SC.version = pySC_version
     SC.rng.default_truncation = sigma_truncate
 
     logger.info('Configuring magnets...')
