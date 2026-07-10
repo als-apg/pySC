@@ -152,8 +152,8 @@ class MultipolarImperfectionCurve(BaseModel, extra="forbid"):
     def check_table_validity(self):
         if len(self.source) != len(self.target):
             raise ValueError("source and target must have the same length.")
-        if not np.all(np.array(self.source) > 0):
-            raise ValueError("source in MultipolarImperfectionCurve is not all positive. If the curve is truly not symmetric w.r.t. zero please contact support.")
+        if not np.all(np.array(self.source) >= 0):
+            raise ValueError("source in MultipolarImperfectionCurve is not all non-negative. If the curve is truly not symmetric w.r.t. zero please contact maintainers.")
         if not np.all(np.diff(self.source) > 0):
             raise ValueError("source in MultipolarImperfectionCurve is not monotonic in ascending order.")
         return self
